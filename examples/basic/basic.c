@@ -23,17 +23,10 @@ int main(void) {
     // in an mmap call like this:
     // mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)
     umf_memory_provider_ops_t *provider_ops = umfOsMemoryProviderOps();
-    umf_os_memory_provider_params_handle_t params = NULL;
+    umf_os_memory_provider_params_t params = umfOsMemoryProviderParamsDefault();
     umf_memory_provider_handle_t provider;
 
-    res = umfOsMemoryProviderParamsCreate(&params);
-    if (res != UMF_RESULT_SUCCESS) {
-        printf("Failed to create OS memory provider params!\n");
-        return -1;
-    }
-
-    res = umfMemoryProviderCreate(provider_ops, params, &provider);
-    umfOsMemoryProviderParamsDestroy(params);
+    res = umfMemoryProviderCreate(provider_ops, &params, &provider);
     if (res != UMF_RESULT_SUCCESS) {
         printf("Failed to create a memory provider!\n");
         return -1;

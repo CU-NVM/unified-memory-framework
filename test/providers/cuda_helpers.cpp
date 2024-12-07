@@ -18,7 +18,6 @@ struct libcu_ops {
     CUresult (*cuCtxCreate)(CUcontext *pctx, unsigned int flags, CUdevice dev);
     CUresult (*cuCtxDestroy)(CUcontext ctx);
     CUresult (*cuCtxGetCurrent)(CUcontext *pctx);
-    CUresult (*cuCtxSetCurrent)(CUcontext ctx);
     CUresult (*cuDeviceGet)(CUdevice *device, int ordinal);
     CUresult (*cuMemAlloc)(CUdeviceptr *dptr, size_t size);
     CUresult (*cuMemFree)(CUdeviceptr dptr);
@@ -35,67 +34,12 @@ struct libcu_ops {
                                        CUpointer_attribute *attributes,
                                        void **data, CUdeviceptr ptr);
     CUresult (*cuStreamSynchronize)(CUstream hStream);
-    CUresult (*cuCtxSynchronize)(void);
 } libcu_ops;
 
 #if USE_DLOPEN
-// Generic no-op stub function for all callbacks
-template <typename... Args> CUresult noop_stub(Args &&...) {
-    return CUDA_SUCCESS; // Always return CUDA_SUCCESS
-}
-
 struct DlHandleCloser {
     void operator()(void *dlHandle) {
         if (dlHandle) {
-            libcu_ops.cuInit = [](auto... args) { return noop_stub(args...); };
-            libcu_ops.cuCtxCreate = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuCtxDestroy = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuCtxGetCurrent = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuCtxSetCurrent = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuDeviceGet = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuMemAlloc = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuMemFree = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuMemAllocHost = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuMemAllocManaged = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuMemFreeHost = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuMemsetD32 = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuMemcpy = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuPointerGetAttribute = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuPointerGetAttributes = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuStreamSynchronize = [](auto... args) {
-                return noop_stub(args...);
-            };
-            libcu_ops.cuCtxSynchronize = [](auto... args) {
-                return noop_stub(args...);
-            };
             utils_close_library(dlHandle);
         }
     }
@@ -104,7 +48,7 @@ struct DlHandleCloser {
 std::unique_ptr<void, DlHandleCloser> cuDlHandle = nullptr;
 int InitCUDAOps() {
 #ifdef _WIN32
-    const char *lib_name = "nvcuda.dll";
+    const char *lib_name = "cudart.dll";
 #else
     const char *lib_name = "libcuda.so";
 #endif
@@ -138,12 +82,6 @@ int InitCUDAOps() {
         utils_get_symbol_addr(cuDlHandle.get(), "cuCtxGetCurrent", lib_name);
     if (libcu_ops.cuCtxGetCurrent == nullptr) {
         fprintf(stderr, "cuCtxGetCurrent symbol not found in %s\n", lib_name);
-        return -1;
-    }
-    *(void **)&libcu_ops.cuCtxSetCurrent =
-        utils_get_symbol_addr(cuDlHandle.get(), "cuCtxSetCurrent", lib_name);
-    if (libcu_ops.cuCtxSetCurrent == nullptr) {
-        fprintf(stderr, "cuCtxSetCurrent symbol not found in %s\n", lib_name);
         return -1;
     }
     *(void **)&libcu_ops.cuDeviceGet =
@@ -215,12 +153,6 @@ int InitCUDAOps() {
                 lib_name);
         return -1;
     }
-    *(void **)&libcu_ops.cuCtxSynchronize =
-        utils_get_symbol_addr(cuDlHandle.get(), "cuCtxSynchronize", lib_name);
-    if (libcu_ops.cuCtxSynchronize == nullptr) {
-        fprintf(stderr, "cuCtxSynchronize symbol not found in %s\n", lib_name);
-        return -1;
-    }
 
     return 0;
 }
@@ -233,7 +165,6 @@ int InitCUDAOps() {
     libcu_ops.cuCtxCreate = cuCtxCreate;
     libcu_ops.cuCtxDestroy = cuCtxDestroy;
     libcu_ops.cuCtxGetCurrent = cuCtxGetCurrent;
-    libcu_ops.cuCtxSetCurrent = cuCtxSetCurrent;
     libcu_ops.cuDeviceGet = cuDeviceGet;
     libcu_ops.cuMemAlloc = cuMemAlloc;
     libcu_ops.cuMemAllocHost = cuMemAllocHost;
@@ -245,30 +176,10 @@ int InitCUDAOps() {
     libcu_ops.cuPointerGetAttribute = cuPointerGetAttribute;
     libcu_ops.cuPointerGetAttributes = cuPointerGetAttributes;
     libcu_ops.cuStreamSynchronize = cuStreamSynchronize;
-    libcu_ops.cuCtxSynchronize = cuCtxSynchronize;
 
     return 0;
 }
 #endif // USE_DLOPEN
-
-static CUresult set_context(CUcontext required_ctx, CUcontext *restore_ctx) {
-    CUcontext current_ctx = NULL;
-    CUresult cu_result = libcu_ops.cuCtxGetCurrent(&current_ctx);
-    if (cu_result != CUDA_SUCCESS) {
-        fprintf(stderr, "cuCtxGetCurrent() failed.\n");
-        return cu_result;
-    }
-
-    *restore_ctx = current_ctx;
-    if (current_ctx != required_ctx) {
-        cu_result = libcu_ops.cuCtxSetCurrent(required_ctx);
-        if (cu_result != CUDA_SUCCESS) {
-            fprintf(stderr, "cuCtxSetCurrent() failed.\n");
-        }
-    }
-
-    return cu_result;
-}
 
 static int init_cuda_lib(void) {
     CUresult result = libcu_ops.cuInit(0);
@@ -280,6 +191,8 @@ static int init_cuda_lib(void) {
 
 int cuda_fill(CUcontext context, CUdevice device, void *ptr, size_t size,
               const void *pattern, size_t pattern_size) {
+
+    (void)context;
     (void)device;
     (void)pattern_size;
 
@@ -289,39 +202,22 @@ int cuda_fill(CUcontext context, CUdevice device, void *ptr, size_t size,
         return -1;
     }
 
-    // set required context
-    CUcontext curr_context = nullptr;
-    set_context(context, &curr_context);
-
     int ret = 0;
     CUresult res =
         libcu_ops.cuMemsetD32((CUdeviceptr)ptr, *(unsigned int *)pattern,
                               size / sizeof(unsigned int));
     if (res != CUDA_SUCCESS) {
-        fprintf(stderr, "cuMemsetD32(%llu, %u, %zu) failed!\n",
-                (CUdeviceptr)ptr, *(unsigned int *)pattern,
-                size / pattern_size);
+        fprintf(stderr, "cuMemsetD32() failed!\n");
         return -1;
     }
 
-    res = libcu_ops.cuCtxSynchronize();
-    if (res != CUDA_SUCCESS) {
-        fprintf(stderr, "cuCtxSynchronize() failed!\n");
-        return -1;
-    }
-
-    // restore context
-    set_context(curr_context, &curr_context);
     return ret;
 }
 
-int cuda_copy(CUcontext context, CUdevice device, void *dst_ptr,
-              const void *src_ptr, size_t size) {
+int cuda_copy(CUcontext context, CUdevice device, void *dst_ptr, void *src_ptr,
+              size_t size) {
+    (void)context;
     (void)device;
-
-    // set required context
-    CUcontext curr_context = nullptr;
-    set_context(context, &curr_context);
 
     int ret = 0;
     CUresult res =
@@ -331,14 +227,12 @@ int cuda_copy(CUcontext context, CUdevice device, void *dst_ptr,
         return -1;
     }
 
-    res = libcu_ops.cuCtxSynchronize();
+    res = libcu_ops.cuStreamSynchronize(0);
     if (res != CUDA_SUCCESS) {
-        fprintf(stderr, "cuCtxSynchronize() failed!\n");
+        fprintf(stderr, "cuStreamSynchronize() failed!\n");
         return -1;
     }
 
-    // restore context
-    set_context(curr_context, &curr_context);
     return ret;
 }
 
@@ -409,40 +303,38 @@ int init_cuda() {
     return InitResult;
 }
 
-int get_cuda_device(CUdevice *device) {
-    CUdevice cuDevice = -1;
+cuda_memory_provider_params_t
+create_cuda_prov_params(umf_usm_memory_type_t memory_type) {
+    cuda_memory_provider_params_t params = {NULL, 0, UMF_MEMORY_TYPE_UNKNOWN};
+    int ret = -1;
 
-    int ret = init_cuda();
+    ret = init_cuda();
     if (ret != 0) {
-        fprintf(stderr, "init_cuda() failed!\n");
-        return ret;
+        // Return empty params. Test will be skipped.
+        return params;
     }
 
+    // Get the first CUDA device
+    CUdevice cuDevice = -1;
     CUresult res = libcu_ops.cuDeviceGet(&cuDevice, 0);
     if (res != CUDA_SUCCESS || cuDevice < 0) {
-        return -1;
+        // Return empty params. Test will be skipped.
+        return params;
     }
 
-    *device = cuDevice;
-    return 0;
-}
-
-int create_context(CUdevice device, CUcontext *context) {
+    // Create a CUDA context
     CUcontext cuContext = nullptr;
-
-    int ret = init_cuda();
-    if (ret != 0) {
-        fprintf(stderr, "init_cuda() failed!\n");
-        return ret;
-    }
-
-    CUresult res = libcu_ops.cuCtxCreate(&cuContext, 0, device);
+    res = libcu_ops.cuCtxCreate(&cuContext, 0, cuDevice);
     if (res != CUDA_SUCCESS || cuContext == nullptr) {
-        return -1;
+        // Return empty params. Test will be skipped.
+        return params;
     }
 
-    *context = cuContext;
-    return 0;
+    params.cuda_context_handle = cuContext;
+    params.cuda_device_handle = cuDevice;
+    params.memory_type = memory_type;
+
+    return params;
 }
 
 int destroy_context(CUcontext context) {

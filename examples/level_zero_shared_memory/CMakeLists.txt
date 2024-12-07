@@ -24,7 +24,7 @@ endif()
 include(FetchContent)
 
 set(LEVEL_ZERO_LOADER_REPO "https://github.com/oneapi-src/level-zero.git")
-set(LEVEL_ZERO_LOADER_TAG v1.19.2)
+set(LEVEL_ZERO_LOADER_TAG v1.17.39)
 
 message(
     STATUS
@@ -45,9 +45,7 @@ message(STATUS "Level Zero include directory: ${LEVEL_ZERO_INCLUDE_DIRS}")
 
 # build the example
 set(EXAMPLE_NAME umf_example_level_zero_shared_memory)
-add_executable(
-    ${EXAMPLE_NAME} level_zero_shared_memory.c
-                    ${UMF_EXAMPLE_DIR}/common/examples_level_zero_helpers.c)
+add_executable(${EXAMPLE_NAME} level_zero_shared_memory.c)
 target_include_directories(${EXAMPLE_NAME} PRIVATE ${LIBUMF_INCLUDE_DIRS}
                                                    ${UMF_EXAMPLE_DIR}/common)
 target_link_directories(${EXAMPLE_NAME} PRIVATE ${LIBUMF_LIBRARY_DIRS}

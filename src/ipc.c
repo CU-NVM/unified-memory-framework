@@ -90,8 +90,6 @@ umf_result_t umfGetIPCHandle(const void *ptr, umf_ipc_handle_t *umfIPCHandle,
         return ret;
     }
 
-    // ipcData->handle_id is filled by tracking provider
-    ipcData->base = allocInfo.base;
     ipcData->pid = utils_getpid();
     ipcData->baseSize = allocInfo.baseSize;
     ipcData->offset = (uintptr_t)ptr - (uintptr_t)allocInfo.base;
@@ -109,7 +107,7 @@ umf_result_t umfPutIPCHandle(umf_ipc_handle_t umfIPCHandle) {
     //       implementation does nothing in Put function. Tracking memory
     //       provider relies on IPC cache and actually Put IPC handle back
     //       to upstream memory provider when umfMemoryProviderFree is called.
-    //       To support encapsulation we should not take into account
+    //       To support incapsulation we should not take into account
     //       implementation details of tracking memory provider and find the
     //       appropriate pool, get memory provider of that pool and call
     //       umfMemoryProviderPutIPCHandle(hProvider,

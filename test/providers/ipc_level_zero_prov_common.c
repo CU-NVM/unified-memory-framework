@@ -6,16 +6,18 @@
  */
 
 #include "ipc_level_zero_prov_common.h"
-#include "utils_level_zero.h"
+#include "level_zero_helpers.h"
 
 #include <umf/providers/provider_level_zero.h>
 
 #include <stdio.h>
 
 void memcopy(void *dst, const void *src, size_t size, void *context) {
-    level_zero_copy_ctx_t *l0_params = (level_zero_copy_ctx_t *)context;
-    int ret = utils_ze_level_zero_copy(l0_params->context, l0_params->device,
-                                       dst, src, size);
+    level_zero_memory_provider_params_t *l0_params =
+        (level_zero_memory_provider_params_t *)context;
+    int ret =
+        level_zero_copy(l0_params->level_zero_context_handle,
+                        l0_params->level_zero_device_handle, dst, src, size);
     if (ret != 0) {
         fprintf(stderr, "level_zero_copy failed with error %d\n", ret);
     }

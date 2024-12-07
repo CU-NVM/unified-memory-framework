@@ -87,8 +87,6 @@ struct memspaceProviderTest : ::memspaceGetTest {
         }
 
         auto [isQuerySupported, memspaceGet] = ::memspaceGetTest::GetParam();
-        (void)memspaceGet;
-
         isQuerySupported(nodeIds.front());
 
         // The test has been marked as skipped in isQuerySupported,

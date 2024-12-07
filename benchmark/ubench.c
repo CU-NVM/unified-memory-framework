@@ -20,11 +20,11 @@
 #include <umf/providers/provider_level_zero.h>
 #include <umf/providers/provider_os_memory.h>
 
-#ifdef UMF_POOL_DISJOINT_ENABLED
+#ifdef UMF_BUILD_LIBUMF_POOL_DISJOINT
 #include <umf/pools/pool_disjoint.h>
 #endif
 
-#ifdef UMF_POOL_JEMALLOC_ENABLED
+#ifdef UMF_BUILD_LIBUMF_POOL_JEMALLOC
 #include <umf/pools/pool_jemalloc.h>
 #endif
 
@@ -124,6 +124,22 @@ UBENCH_EX(simple, glibc_malloc) {
 
 ////////////////// OS MEMORY PROVIDER
 
+static umf_os_memory_provider_params_t UMF_OS_MEMORY_PROVIDER_PARAMS = {
+    /* .protection = */ UMF_PROTECTION_READ | UMF_PROTECTION_WRITE,
+    /* .visibility = */ UMF_MEM_MAP_PRIVATE,
+    /* .shm_name = */ NULL,
+
+    // NUMA config
+    /* .numa_list = */ NULL,
+    /* .numa_list_len = */ 0,
+
+    /* .numa_mode = */ UMF_NUMA_MODE_DEFAULT,
+    /* .part_size = */ 0,
+
+    /* .partitions = */ NULL,
+    /* .partitions_len = */ 0,
+};
+
 static void *w_umfMemoryProviderAlloc(void *provider, size_t size,
                                       size_t alignment) {
     void *ptr = NULL;
@@ -155,17 +171,9 @@ UBENCH_EX(simple, os_memory_provider) {
 
     umf_result_t umf_result;
     umf_memory_provider_handle_t os_memory_provider = NULL;
-    umf_os_memory_provider_params_handle_t os_params = NULL;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "error: umfOsMemoryProviderParamsCreate() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(), os_params,
+    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
+                                         &UMF_OS_MEMORY_PROVIDER_PARAMS,
                                          &os_memory_provider);
-    umfOsMemoryProviderParamsDestroy(os_params);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfMemoryProviderCreate() failed\n");
         exit(-1);
@@ -207,17 +215,9 @@ UBENCH_EX(simple, proxy_pool_with_os_memory_provider) {
 
     umf_result_t umf_result;
     umf_memory_provider_handle_t os_memory_provider = NULL;
-    umf_os_memory_provider_params_handle_t os_params = NULL;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "error: umfOsMemoryProviderParamsCreate() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(), os_params,
+    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
+                                         &UMF_OS_MEMORY_PROVIDER_PARAMS,
                                          &os_memory_provider);
-    umfOsMemoryProviderParamsDestroy(os_params);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfMemoryProviderCreate() failed\n");
         exit(-1);
@@ -244,7 +244,7 @@ UBENCH_EX(simple, proxy_pool_with_os_memory_provider) {
     free(array);
 }
 
-#if (defined UMF_POOL_DISJOINT_ENABLED)
+#if (defined UMF_BUILD_LIBUMF_POOL_DISJOINT)
 ////////////////// DISJOINT POOL WITH OS MEMORY PROVIDER
 
 UBENCH_EX(simple, disjoint_pool_with_os_memory_provider) {
@@ -252,63 +252,24 @@ UBENCH_EX(simple, disjoint_pool_with_os_memory_provider) {
 
     umf_result_t umf_result;
     umf_memory_provider_handle_t os_memory_provider = NULL;
-    umf_os_memory_provider_params_handle_t os_params = NULL;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "error: umfOsMemoryProviderParamsCreate() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(), os_params,
+    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
+                                         &UMF_OS_MEMORY_PROVIDER_PARAMS,
                                          &os_memory_provider);
-    umfOsMemoryProviderParamsDestroy(os_params);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfMemoryProviderCreate() failed\n");
         exit(-1);
     }
 
-    umf_disjoint_pool_params_handle_t disjoint_memory_pool_params = NULL;
-    umf_result = umfDisjointPoolParamsCreate(&disjoint_memory_pool_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "ERROR: umfDisjointPoolParamsCreate failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfDisjointPoolParamsSetSlabMinSize(
-        disjoint_memory_pool_params, DISJOINT_POOL_SLAB_MIN_SIZE);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfDisjointPoolParamsSetSlabMinSize() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfDisjointPoolParamsSetMaxPoolableSize(
-        disjoint_memory_pool_params, DISJOINT_POOL_MAX_POOLABLE_SIZE);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfDisjointPoolParamsSetMaxPoolableSize() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfDisjointPoolParamsSetCapacity(disjoint_memory_pool_params,
-                                                  DISJOINT_POOL_CAPACITY);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "error: umfDisjointPoolParamsSetCapacity() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfDisjointPoolParamsSetMinBucketSize(
-        disjoint_memory_pool_params, DISJOINT_POOL_MIN_BUCKET_SIZE);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfDisjointPoolParamsSetMinBucketSize() failed\n");
-        exit(-1);
-    }
+    umf_disjoint_pool_params_t disjoint_memory_pool_params = {0};
+    disjoint_memory_pool_params.SlabMinSize = DISJOINT_POOL_SLAB_MIN_SIZE;
+    disjoint_memory_pool_params.MaxPoolableSize =
+        DISJOINT_POOL_MAX_POOLABLE_SIZE;
+    disjoint_memory_pool_params.Capacity = DISJOINT_POOL_CAPACITY;
+    disjoint_memory_pool_params.MinBucketSize = DISJOINT_POOL_MIN_BUCKET_SIZE;
 
     umf_memory_pool_handle_t disjoint_pool;
     umf_result = umfPoolCreate(umfDisjointPoolOps(), os_memory_provider,
-                               disjoint_memory_pool_params, 0, &disjoint_pool);
+                               &disjoint_memory_pool_params, 0, &disjoint_pool);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfPoolCreate() failed\n");
         exit(-1);
@@ -323,13 +284,12 @@ UBENCH_EX(simple, disjoint_pool_with_os_memory_provider) {
     }
 
     umfPoolDestroy(disjoint_pool);
-    umfDisjointPoolParamsDestroy(disjoint_memory_pool_params);
     umfMemoryProviderDestroy(os_memory_provider);
     free(array);
 }
-#endif /* (defined UMF_POOL_DISJOINT_ENABLED) */
+#endif /* (defined UMF_BUILD_LIBUMF_POOL_DISJOINT) */
 
-#if (defined UMF_POOL_JEMALLOC_ENABLED)
+#if (defined UMF_BUILD_LIBUMF_POOL_JEMALLOC)
 ////////////////// JEMALLOC POOL WITH OS MEMORY PROVIDER
 
 UBENCH_EX(simple, jemalloc_pool_with_os_memory_provider) {
@@ -337,17 +297,9 @@ UBENCH_EX(simple, jemalloc_pool_with_os_memory_provider) {
 
     umf_result_t umf_result;
     umf_memory_provider_handle_t os_memory_provider = NULL;
-    umf_os_memory_provider_params_handle_t os_params = NULL;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "error: umfOsMemoryProviderParamsCreate() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(), os_params,
+    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
+                                         &UMF_OS_MEMORY_PROVIDER_PARAMS,
                                          &os_memory_provider);
-    umfOsMemoryProviderParamsDestroy(os_params);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfMemoryProviderCreate() failed\n");
         exit(-1);
@@ -373,7 +325,7 @@ UBENCH_EX(simple, jemalloc_pool_with_os_memory_provider) {
     umfMemoryProviderDestroy(os_memory_provider);
     free(array);
 }
-#endif /* (defined UMF_POOL_JEMALLOC_ENABLED) */
+#endif /* (defined UMF_BUILD_LIBUMF_POOL_JEMALLOC) */
 
 #if (defined UMF_POOL_SCALABLE_ENABLED)
 ////////////////// SCALABLE (TBB) POOL WITH OS MEMORY PROVIDER
@@ -383,17 +335,9 @@ UBENCH_EX(simple, scalable_pool_with_os_memory_provider) {
 
     umf_result_t umf_result;
     umf_memory_provider_handle_t os_memory_provider = NULL;
-    umf_os_memory_provider_params_handle_t os_params = NULL;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "error: umfOsMemoryProviderParamsCreate() failed\n");
-        exit(-1);
-    }
-
-    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(), os_params,
+    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
+                                         &UMF_OS_MEMORY_PROVIDER_PARAMS,
                                          &os_memory_provider);
-    umfOsMemoryProviderParamsDestroy(os_params);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfMemoryProviderCreate() failed\n");
         exit(-1);
@@ -421,7 +365,7 @@ UBENCH_EX(simple, scalable_pool_with_os_memory_provider) {
 }
 #endif /* (defined UMF_POOL_SCALABLE_ENABLED) */
 
-#if (defined UMF_POOL_DISJOINT_ENABLED &&                                      \
+#if (defined UMF_BUILD_LIBUMF_POOL_DISJOINT &&                                 \
      defined UMF_BUILD_LEVEL_ZERO_PROVIDER && defined UMF_BUILD_GPU_TESTS)
 static void do_ipc_get_put_benchmark(alloc_t *allocs, size_t num_allocs,
                                      size_t repeats,
@@ -445,35 +389,40 @@ static void do_ipc_get_put_benchmark(alloc_t *allocs, size_t num_allocs,
     }
 }
 
-static int create_level_zero_params(ze_context_handle_t *context,
-                                    ze_device_handle_t *device) {
+int create_level_zero_params(level_zero_memory_provider_params_t *params) {
     uint32_t driver_idx = 0;
     ze_driver_handle_t driver = NULL;
+    ze_context_handle_t context = NULL;
+    ze_device_handle_t device = NULL;
 
-    int ret = utils_ze_init_level_zero();
+    int ret = init_level_zero();
     if (ret != 0) {
         fprintf(stderr, "Failed to init Level 0!\n");
         return ret;
     }
 
-    ret = utils_ze_find_driver_with_gpu(&driver_idx, &driver);
+    ret = find_driver_with_gpu(&driver_idx, &driver);
     if (ret || driver == NULL) {
         fprintf(stderr, "Cannot find L0 driver with GPU device!\n");
         return ret;
     }
 
-    ret = utils_ze_create_context(driver, context);
+    ret = create_context(driver, &context);
     if (ret != 0) {
         fprintf(stderr, "Failed to create L0 context!\n");
         return ret;
     }
 
-    ret = utils_ze_find_gpu_device(driver, device);
-    if (ret) {
+    ret = find_gpu_device(driver, &device);
+    if (ret || device == NULL) {
         fprintf(stderr, "Cannot find GPU device!\n");
-        utils_ze_destroy_context(*context);
+        destroy_context(context);
         return ret;
     }
+
+    params->level_zero_context_handle = context;
+    params->level_zero_device_handle = device;
+    params->memory_type = UMF_MEMORY_TYPE_DEVICE;
 
     return ret;
 }
@@ -481,47 +430,11 @@ static int create_level_zero_params(ze_context_handle_t *context,
 UBENCH_EX(ipc, disjoint_pool_with_level_zero_provider) {
     const size_t BUFFER_SIZE = 100;
     const size_t N_BUFFERS = 1000;
-    umf_result_t umf_result;
-    ze_context_handle_t context = NULL;
-    ze_device_handle_t device = NULL;
-    umf_level_zero_memory_provider_params_handle_t level_zero_params = NULL;
+    level_zero_memory_provider_params_t level_zero_params = {0};
 
-    int ret = create_level_zero_params(&context, &device);
+    int ret = create_level_zero_params(&level_zero_params);
     if (ret != 0) {
-        fprintf(stderr, "error: create_level_zero_params() failed\n");
         exit(-1);
-    }
-
-    umf_result = umfLevelZeroMemoryProviderParamsCreate(&level_zero_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfLevelZeroMemoryProviderParamsCreate() failed\n");
-        goto err_destroy_context;
-    }
-
-    umf_result =
-        umfLevelZeroMemoryProviderParamsSetContext(level_zero_params, context);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfLevelZeroMemoryProviderParamsSetContext() failed\n");
-        goto err_destroy_params;
-    }
-
-    umf_result =
-        umfLevelZeroMemoryProviderParamsSetDevice(level_zero_params, device);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfLevelZeroMemoryProviderParamsSetDevice() failed\n");
-        goto err_destroy_params;
-    }
-
-    umf_result = umfLevelZeroMemoryProviderParamsSetMemoryType(
-        level_zero_params, UMF_MEMORY_TYPE_DEVICE);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(
-            stderr,
-            "error: umfLevelZeroMemoryProviderParamsSetMemoryType() failed\n");
-        goto err_destroy_params;
     }
 
     alloc_t *allocs = alloc_array(N_BUFFERS);
@@ -536,58 +449,28 @@ UBENCH_EX(ipc, disjoint_pool_with_level_zero_provider) {
         goto err_free_allocs;
     }
 
+    umf_result_t umf_result;
     umf_memory_provider_handle_t provider = NULL;
     umf_result = umfMemoryProviderCreate(umfLevelZeroMemoryProviderOps(),
-                                         level_zero_params, &provider);
+                                         &level_zero_params, &provider);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfMemoryProviderCreate() failed\n");
         goto err_free_ipc_handles;
     }
 
-    umf_disjoint_pool_params_handle_t disjoint_params = NULL;
-    umf_result = umfDisjointPoolParamsCreate(&disjoint_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "ERROR: umfDisjointPoolParamsCreate failed\n");
-        goto err_provider_destroy;
-    }
-
-    umf_result =
-        umfDisjointPoolParamsSetSlabMinSize(disjoint_params, BUFFER_SIZE * 10);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfDisjointPoolParamsSetSlabMinSize() failed\n");
-        goto err_params_destroy;
-    }
-
-    umf_result = umfDisjointPoolParamsSetMaxPoolableSize(
-        disjoint_params, 4ull * 1024ull * 1024ull);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfDisjointPoolParamsSetMaxPoolableSize() failed\n");
-        goto err_params_destroy;
-    }
-
-    umf_result =
-        umfDisjointPoolParamsSetCapacity(disjoint_params, 64ull * 1024ull);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "error: umfDisjointPoolParamsSetCapacity() failed\n");
-        goto err_params_destroy;
-    }
-
-    umf_result = umfDisjointPoolParamsSetMinBucketSize(disjoint_params, 64);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "error: umfDisjointPoolParamsSetMinBucketSize() failed\n");
-        goto err_params_destroy;
-    }
-
-    umf_pool_create_flags_t flags = UMF_POOL_CREATE_FLAG_NONE;
+    umf_disjoint_pool_params_t disjoint_params = {0};
+    disjoint_params.SlabMinSize = BUFFER_SIZE * 10;
+    disjoint_params.MaxPoolableSize = 4ull * 1024ull * 1024ull;
+    disjoint_params.Capacity = 64ull * 1024ull;
+    disjoint_params.MinBucketSize = 64;
+    umf_pool_create_flags_t flags = UMF_POOL_CREATE_FLAG_OWN_PROVIDER;
     umf_memory_pool_handle_t pool;
-    umf_result = umfPoolCreate(umfDisjointPoolOps(), provider, disjoint_params,
+    umf_result = umfPoolCreate(umfDisjointPoolOps(), provider, &disjoint_params,
                                flags, &pool);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "error: umfPoolCreate() failed\n");
-        goto err_params_destroy;
+        umfMemoryProviderDestroy(provider);
+        goto err_free_ipc_handles;
     }
 
     for (size_t i = 0; i < N_BUFFERS; ++i) {
@@ -612,25 +495,16 @@ err_buffer_destroy:
 
     umfPoolDestroy(pool);
 
-err_params_destroy:
-    umfDisjointPoolParamsDestroy(disjoint_params);
-
-err_provider_destroy:
-    umfMemoryProviderDestroy(provider);
-
 err_free_ipc_handles:
     free(ipc_handles);
 
 err_free_allocs:
     free(allocs);
 
-err_destroy_params:
-    umfLevelZeroMemoryProviderParamsDestroy(level_zero_params);
-
 err_destroy_context:
-    utils_ze_destroy_context(context);
+    destroy_context(level_zero_params.level_zero_context_handle);
 }
-#endif /* (defined UMF_POLL_DISJOINT_ENABLED && defined UMF_BUILD_LEVEL_ZERO_PROVIDER && defined UMF_BUILD_GPU_TESTS) */
+#endif /* (defined UMF_BUILD_LIBUMF_POOL_DISJOINT && defined UMF_BUILD_LEVEL_ZERO_PROVIDER && defined UMF_BUILD_GPU_TESTS) */
 
 // TODO add IPC benchmark for CUDA
 

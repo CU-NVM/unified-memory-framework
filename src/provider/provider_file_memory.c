@@ -25,52 +25,13 @@ umf_memory_provider_ops_t *umfFileMemoryProviderOps(void) {
     return NULL;
 }
 
-umf_result_t umfFileMemoryProviderParamsCreate(
-    umf_file_memory_provider_params_handle_t *hParams, const char *path) {
-    (void)hParams;
-    (void)path;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfFileMemoryProviderParamsDestroy(
-    umf_file_memory_provider_params_handle_t hParams) {
-    (void)hParams;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfFileMemoryProviderParamsSetPath(
-    umf_file_memory_provider_params_handle_t hParams, const char *path) {
-    (void)hParams;
-    (void)path;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfFileMemoryProviderParamsSetProtection(
-    umf_file_memory_provider_params_handle_t hParams, unsigned protection) {
-    (void)hParams;
-    (void)protection;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfFileMemoryProviderParamsSetVisibility(
-    umf_file_memory_provider_params_handle_t hParams,
-    umf_memory_visibility_t visibility) {
-    (void)hParams;
-    (void)visibility;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
 #else // !defined(_WIN32) && !defined(UMF_NO_HWLOC)
 
 #include "base_alloc_global.h"
-#include "coarse.h"
 #include "critnib.h"
-#include "libumf.h"
 #include "utils_common.h"
 #include "utils_concurrency.h"
 #include "utils_log.h"
-
-#define FSDAX_PAGE_SIZE_2MB ((size_t)(2 * 1024 * 1024)) // == 2 MB
 
 #define TLS_MSG_BUF_LEN 1024
 
@@ -78,7 +39,6 @@ typedef struct file_memory_provider_t {
     utils_mutex_t lock; // lock for file parameters (size and offsets)
 
     char path[PATH_MAX]; // a path to the file
-    bool is_fsdax;       // true if file is located on FSDAX
     int fd;              // file descriptor for memory mapping
     size_t size_fd;      // size of the file used for memory mappings
     size_t offset_fd;    // offset in the file used for memory mappings
@@ -91,7 +51,7 @@ typedef struct file_memory_provider_t {
     unsigned visibility; // memory visibility mode
     size_t page_size;    // minimum page size
 
-    // IPC is enabled only for the UMF_MEM_MAP_SHARED visibility
+    // IPC is enabled only for UMF_MEM_MAP_SHARED or UMF_MEM_MAP_SYNC visibility
     bool IPC_enabled;
 
     critnib *mmaps; // a critnib map storing mmap mappings (addr, size)
@@ -102,16 +62,7 @@ typedef struct file_memory_provider_t {
     // It is needed mainly in the get_ipc_handle and open_ipc_handle hooks
     // to mmap a specific part of a file.
     critnib *fd_offset_map;
-
-    coarse_t *coarse; // coarse library handle
 } file_memory_provider_t;
-
-// File Memory Provider settings struct
-typedef struct umf_file_memory_provider_params_t {
-    char *path;
-    unsigned protection;
-    umf_memory_visibility_t visibility;
-} umf_file_memory_provider_params_t;
 
 typedef struct file_last_native_error_t {
     int32_t native_error;
@@ -163,29 +114,24 @@ file_translate_params(umf_file_memory_provider_params_t *in_params,
         return result;
     }
 
-    // IPC is enabled only for the UMF_MEM_MAP_SHARED visibility
-    provider->IPC_enabled = (in_params->visibility == UMF_MEM_MAP_SHARED);
+    // IPC is enabled only for UMF_MEM_MAP_SHARED or UMF_MEM_MAP_SYNC visibility
+    provider->IPC_enabled = (in_params->visibility == UMF_MEM_MAP_SHARED ||
+                             in_params->visibility == UMF_MEM_MAP_SYNC);
 
     return UMF_RESULT_SUCCESS;
 }
 
-static umf_result_t file_alloc_cb(void *provider, size_t size, size_t alignment,
-                                  void **resultPtr);
-static umf_result_t file_allocation_split_cb(void *provider, void *ptr,
-                                             size_t totalSize,
-                                             size_t firstSize);
-static umf_result_t file_allocation_merge_cb(void *provider, void *lowPtr,
-                                             void *highPtr, size_t totalSize);
-
 static umf_result_t file_initialize(void *params, void **provider) {
     umf_result_t ret;
 
-    if (params == NULL) {
+    if (provider == NULL || params == NULL) {
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
     umf_file_memory_provider_params_t *in_params =
         (umf_file_memory_provider_params_t *)params;
+
+    size_t page_size = utils_get_page_size();
 
     if (in_params->path == NULL) {
         LOG_ERR("file path is missing");
@@ -199,6 +145,8 @@ static umf_result_t file_initialize(void *params, void **provider) {
     }
 
     memset(file_provider, 0, sizeof(*file_provider));
+
+    file_provider->page_size = page_size;
 
     ret = file_translate_params(in_params, file_provider);
     if (ret != UMF_RESULT_SUCCESS) {
@@ -216,55 +164,21 @@ static umf_result_t file_initialize(void *params, void **provider) {
         goto err_free_file_provider;
     }
 
-    if (utils_set_file_size(file_provider->fd, FSDAX_PAGE_SIZE_2MB)) {
+    if (utils_set_file_size(file_provider->fd, page_size)) {
         LOG_ERR("cannot set size of the file: %s", in_params->path);
         ret = UMF_RESULT_ERROR_UNKNOWN;
         goto err_close_fd;
     }
 
-    file_provider->size_fd = FSDAX_PAGE_SIZE_2MB;
+    file_provider->size_fd = page_size;
 
     LOG_DEBUG("size of the file %s is: %zu", in_params->path,
               file_provider->size_fd);
 
-    if (!(in_params->visibility & UMF_MEM_MAP_PRIVATE)) {
-        // check if file is located on FSDAX
-        void *addr = utils_mmap_file(
-            NULL, file_provider->size_fd, file_provider->protection,
-            file_provider->visibility, file_provider->fd, 0,
-            &file_provider->is_fsdax);
-        if (addr) {
-            utils_munmap(addr, file_provider->size_fd);
-        }
-    }
-
-    if (file_provider->is_fsdax) {
-        file_provider->page_size = FSDAX_PAGE_SIZE_2MB;
-    } else {
-        file_provider->page_size = utils_get_page_size();
-    }
-
-    coarse_params_t coarse_params = {0};
-    coarse_params.provider = file_provider;
-    coarse_params.page_size = file_provider->page_size;
-    coarse_params.cb.alloc = file_alloc_cb;
-    coarse_params.cb.free = NULL; // not available for the file provider
-    coarse_params.cb.split = file_allocation_split_cb;
-    coarse_params.cb.merge = file_allocation_merge_cb;
-
-    coarse_t *coarse = NULL;
-    ret = coarse_new(&coarse_params, &coarse);
-    if (ret != UMF_RESULT_SUCCESS) {
-        LOG_ERR("coarse_new() failed");
-        goto err_close_fd;
-    }
-
-    file_provider->coarse = coarse;
-
     if (utils_mutex_init(&file_provider->lock) == NULL) {
         LOG_ERR("lock init failed");
         ret = UMF_RESULT_ERROR_UNKNOWN;
-        goto err_coarse_delete;
+        goto err_close_fd;
     }
 
     file_provider->fd_offset_map = critnib_new();
@@ -289,8 +203,6 @@ err_delete_fd_offset_map:
     critnib_delete(file_provider->fd_offset_map);
 err_mutex_destroy_not_free:
     utils_mutex_destroy_not_free(&file_provider->lock);
-err_coarse_delete:
-    coarse_delete(file_provider->coarse);
 err_close_fd:
     utils_close_fd(file_provider->fd);
 err_free_file_provider:
@@ -299,6 +211,11 @@ err_free_file_provider:
 }
 
 static void file_finalize(void *provider) {
+    if (provider == NULL) {
+        assert(0);
+        return;
+    }
+
     file_memory_provider_t *file_provider = provider;
 
     uintptr_t key = 0;
@@ -315,7 +232,6 @@ static void file_finalize(void *provider) {
     utils_close_fd(file_provider->fd);
     critnib_delete(file_provider->fd_offset_map);
     critnib_delete(file_provider->mmaps);
-    coarse_delete(file_provider->coarse);
     umf_ba_global_free(file_provider);
 }
 
@@ -377,8 +293,8 @@ static umf_result_t file_mmap_aligned(file_memory_provider_t *file_provider,
     ASSERT_IS_ALIGNED(extended_size, page_size);
     ASSERT_IS_ALIGNED(aligned_offset_fd, page_size);
 
-    void *ptr = utils_mmap_file(NULL, extended_size, prot, flag, fd,
-                                aligned_offset_fd, NULL);
+    void *ptr =
+        utils_mmap_file(NULL, extended_size, prot, flag, fd, aligned_offset_fd);
     if (ptr == NULL) {
         LOG_PERR("memory mapping failed");
         return UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC;
@@ -474,32 +390,23 @@ static umf_result_t file_alloc_aligned(file_memory_provider_t *file_provider,
 
 static umf_result_t file_alloc(void *provider, size_t size, size_t alignment,
                                void **resultPtr) {
-    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
-    return coarse_alloc(file_provider->coarse, size, alignment, resultPtr);
-}
-
-static umf_result_t file_alloc_cb(void *provider, size_t size, size_t alignment,
-                                  void **resultPtr) {
     umf_result_t umf_result;
     int ret;
 
-    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
+    if (provider == NULL || resultPtr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
 
-    *resultPtr = NULL;
-
-    // alignment must be a power of two and a multiple or a divider of the page size
-    if (alignment && ((alignment & (alignment - 1)) ||
-                      ((alignment % file_provider->page_size) &&
-                       (file_provider->page_size % alignment)))) {
-        LOG_ERR("wrong alignment: %zu (not a power of 2 or a multiple or a "
-                "divider of the page size (%zu))",
-                alignment, file_provider->page_size);
+    // alignment must be a power of two and a multiple of sizeof(void *)
+    if (alignment &&
+        ((alignment & (alignment - 1)) || (alignment % sizeof(void *)))) {
+        LOG_ERR("wrong alignment: %zu (not a power of 2 or a multiple of "
+                "sizeof(void *))",
+                alignment);
         return UMF_RESULT_ERROR_INVALID_ALIGNMENT;
     }
 
-    if (IS_NOT_ALIGNED(alignment, file_provider->page_size)) {
-        alignment = ALIGN_UP(alignment, file_provider->page_size);
-    }
+    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
 
     void *addr = NULL;
     size_t alloc_offset_fd; // needed for critnib_insert()
@@ -519,14 +426,7 @@ static umf_result_t file_alloc_cb(void *provider, size_t size, size_t alignment,
         LOG_ERR("inserting a value to the file descriptor offset map failed "
                 "(addr=%p, offset=%zu)",
                 addr, alloc_offset_fd);
-        // We cannot undo the file_alloc_aligned() call here,
-        // because the file memory provider does not support the free operation.
-        return UMF_RESULT_ERROR_UNKNOWN;
     }
-
-    LOG_DEBUG("inserted a value to the file descriptor offset map (addr=%p, "
-              "offset=%zu)",
-              addr, alloc_offset_fd);
 
     *resultPtr = addr;
 
@@ -570,11 +470,13 @@ static void file_get_last_native_error(void *provider, const char **ppMessage,
 
 static umf_result_t file_get_recommended_page_size(void *provider, size_t size,
                                                    size_t *page_size) {
-    (void)provider; // unused
-    (void)size;     // unused
+    (void)size; // unused
 
-    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
-    *page_size = file_provider->page_size;
+    if (provider == NULL || page_size == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    *page_size = utils_get_page_size();
 
     return UMF_RESULT_SUCCESS;
 }
@@ -597,7 +499,9 @@ static umf_result_t file_purge_lazy(void *provider, void *ptr, size_t size) {
 }
 
 static umf_result_t file_purge_force(void *provider, void *ptr, size_t size) {
-    (void)provider; // unused
+    if (provider == NULL || ptr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
 
     errno = 0;
     if (utils_purge(ptr, size, UMF_PURGE_FORCE)) {
@@ -614,15 +518,10 @@ static const char *file_get_name(void *provider) {
     return "FILE";
 }
 
+// This function is supposed to be thread-safe, so it should NOT be called concurrently
+// with file_allocation_merge() with the same pointer.
 static umf_result_t file_allocation_split(void *provider, void *ptr,
                                           size_t totalSize, size_t firstSize) {
-    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
-    return coarse_split(file_provider->coarse, ptr, totalSize, firstSize);
-}
-
-static umf_result_t file_allocation_split_cb(void *provider, void *ptr,
-                                             size_t totalSize,
-                                             size_t firstSize) {
     (void)totalSize;
 
     file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
@@ -632,42 +531,29 @@ static umf_result_t file_allocation_split_cb(void *provider, void *ptr,
 
     void *value = critnib_get(file_provider->fd_offset_map, (uintptr_t)ptr);
     if (value == NULL) {
-        LOG_ERR("getting a value from the file descriptor offset map failed "
-                "(addr=%p)",
+        LOG_ERR("file_allocation_split(): getting a value from the file "
+                "descriptor offset map failed (addr=%p)",
                 ptr);
         return UMF_RESULT_ERROR_UNKNOWN;
     }
-
-    LOG_DEBUG("split the value from the file descriptor offset map (addr=%p) "
-              "from size %zu to %zu + %zu",
-              ptr, totalSize, firstSize, totalSize - firstSize);
 
     uintptr_t new_key = (uintptr_t)ptr + firstSize;
     void *new_value = (void *)((uintptr_t)value + firstSize);
     int ret = critnib_insert(file_provider->fd_offset_map, new_key, new_value,
                              0 /* update */);
     if (ret) {
-        LOG_ERR("inserting a value to the file descriptor offset map failed "
-                "(addr=%p, offset=%zu)",
+        LOG_ERR("file_allocation_split(): inserting a value to the file "
+                "descriptor offset map failed (addr=%p, offset=%zu)",
                 (void *)new_key, (size_t)new_value - 1);
         return UMF_RESULT_ERROR_UNKNOWN;
     }
 
-    LOG_DEBUG("inserted a value to the file descriptor offset map (addr=%p, "
-              "offset=%zu)",
-              (void *)new_key, (size_t)new_value - 1);
-
     return UMF_RESULT_SUCCESS;
 }
 
+// It should NOT be called concurrently with file_allocation_split() with the same pointer.
 static umf_result_t file_allocation_merge(void *provider, void *lowPtr,
                                           void *highPtr, size_t totalSize) {
-    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
-    return coarse_merge(file_provider->coarse, lowPtr, highPtr, totalSize);
-}
-
-static umf_result_t file_allocation_merge_cb(void *provider, void *lowPtr,
-                                             void *highPtr, size_t totalSize) {
     (void)lowPtr;
     (void)totalSize;
 
@@ -679,15 +565,11 @@ static umf_result_t file_allocation_merge_cb(void *provider, void *lowPtr,
     void *value =
         critnib_remove(file_provider->fd_offset_map, (uintptr_t)highPtr);
     if (value == NULL) {
-        LOG_ERR("removing a value from the file descriptor offset map failed "
-                "(addr=%p)",
+        LOG_ERR("file_allocation_merge(): removing a value from the file "
+                "descriptor offset map failed (addr=%p)",
                 highPtr);
         return UMF_RESULT_ERROR_UNKNOWN;
     }
-
-    LOG_DEBUG("removed a value from the file descriptor offset map (addr=%p) - "
-              "merged with %p",
-              highPtr, lowPtr);
 
     return UMF_RESULT_SUCCESS;
 }
@@ -696,14 +578,17 @@ typedef struct file_ipc_data_t {
     char path[PATH_MAX];
     size_t offset_fd;
     size_t size;
-    unsigned protection; // combination of OS-specific protection flags
-    unsigned visibility; // memory visibility mode
 } file_ipc_data_t;
 
 static umf_result_t file_get_ipc_handle_size(void *provider, size_t *size) {
+    if (provider == NULL || size == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
     if (!file_provider->IPC_enabled) {
-        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
+        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED nor "
+                "UMF_MEM_MAP_SYNC")
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
@@ -714,15 +599,22 @@ static umf_result_t file_get_ipc_handle_size(void *provider, size_t *size) {
 
 static umf_result_t file_get_ipc_handle(void *provider, const void *ptr,
                                         size_t size, void *providerIpcData) {
+    if (provider == NULL || ptr == NULL || providerIpcData == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
     if (!file_provider->IPC_enabled) {
-        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
+        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED nor "
+                "UMF_MEM_MAP_SYNC")
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
     void *value = critnib_get(file_provider->fd_offset_map, (uintptr_t)ptr);
     if (value == NULL) {
-        LOG_ERR("getting a value from the IPC cache failed (addr=%p)", ptr);
+        LOG_ERR("file_get_ipc_handle(): getting a value from the IPC cache "
+                "failed (addr=%p)",
+                ptr);
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
@@ -731,16 +623,19 @@ static umf_result_t file_get_ipc_handle(void *provider, const void *ptr,
     file_ipc_data->size = size;
     strncpy(file_ipc_data->path, file_provider->path, PATH_MAX - 1);
     file_ipc_data->path[PATH_MAX - 1] = '\0';
-    file_ipc_data->protection = file_provider->protection;
-    file_ipc_data->visibility = file_provider->visibility;
 
     return UMF_RESULT_SUCCESS;
 }
 
 static umf_result_t file_put_ipc_handle(void *provider, void *providerIpcData) {
+    if (provider == NULL || providerIpcData == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
     if (!file_provider->IPC_enabled) {
-        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
+        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED nor "
+                "UMF_MEM_MAP_SYNC")
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
@@ -755,26 +650,20 @@ static umf_result_t file_put_ipc_handle(void *provider, void *providerIpcData) {
 
 static umf_result_t file_open_ipc_handle(void *provider, void *providerIpcData,
                                          void **ptr) {
+    if (provider == NULL || providerIpcData == NULL || ptr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
     if (!file_provider->IPC_enabled) {
-        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
+        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED nor "
+                "UMF_MEM_MAP_SYNC")
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
     file_ipc_data_t *file_ipc_data = (file_ipc_data_t *)providerIpcData;
     umf_result_t ret = UMF_RESULT_SUCCESS;
     int fd;
-
-    size_t offset_aligned = file_ipc_data->offset_fd;
-    size_t size_aligned = file_ipc_data->size;
-
-    if (file_provider->is_fsdax) {
-        // It is just a workaround for case when
-        // file_alloc() was called with the size argument
-        // that is not a multiplier of FSDAX_PAGE_SIZE_2MB.
-        utils_align_ptr_down_size_up((void **)&offset_aligned, &size_aligned,
-                                     FSDAX_PAGE_SIZE_2MB);
-    }
 
     fd = utils_file_open(file_ipc_data->path);
     if (fd == -1) {
@@ -783,42 +672,30 @@ static umf_result_t file_open_ipc_handle(void *provider, void *providerIpcData,
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
-    char *addr =
-        utils_mmap_file(NULL, size_aligned, file_ipc_data->protection,
-                        file_ipc_data->visibility, fd, offset_aligned, NULL);
+    *ptr = utils_mmap_file(NULL, file_ipc_data->size, file_provider->protection,
+                           file_provider->visibility, fd,
+                           file_ipc_data->offset_fd);
     (void)utils_close_fd(fd);
-    if (addr == NULL) {
+    if (*ptr == NULL) {
         file_store_last_native_error(UMF_FILE_RESULT_ERROR_ALLOC_FAILED, errno);
-        LOG_PERR("file mapping failed (path: %s, size: %zu, protection: %u, "
-                 "visibility: %u, fd: %i, offset: %zu)",
-                 file_ipc_data->path, size_aligned, file_ipc_data->protection,
-                 file_ipc_data->visibility, fd, offset_aligned);
-        return UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC;
+        LOG_PERR("memory mapping failed");
+        ret = UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC;
     }
-
-    LOG_DEBUG("file mapped (path: %s, size: %zu, protection: %u, visibility: "
-              "%u, fd: %i, offset: %zu) at address %p",
-              file_ipc_data->path, size_aligned, file_ipc_data->protection,
-              file_ipc_data->visibility, fd, offset_aligned, (void *)addr);
-
-    *ptr = addr;
 
     return ret;
 }
 
 static umf_result_t file_close_ipc_handle(void *provider, void *ptr,
                                           size_t size) {
-    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
-    if (!file_provider->IPC_enabled) {
-        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
+    if (provider == NULL || ptr == NULL) {
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
-    if (file_provider->is_fsdax) {
-        // It is just a workaround for case when
-        // file_alloc() was called with the size argument
-        // that is not a multiplier of FSDAX_PAGE_SIZE_2MB.
-        utils_align_ptr_down_size_up(&ptr, &size, FSDAX_PAGE_SIZE_2MB);
+    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
+    if (!file_provider->IPC_enabled) {
+        LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED nor "
+                "UMF_MEM_MAP_SYNC")
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
     errno = 0;
@@ -834,17 +711,11 @@ static umf_result_t file_close_ipc_handle(void *provider, void *ptr,
     return UMF_RESULT_SUCCESS;
 }
 
-static umf_result_t file_free(void *provider, void *ptr, size_t size) {
-    file_memory_provider_t *file_provider = (file_memory_provider_t *)provider;
-    return coarse_free(file_provider->coarse, ptr, size);
-}
-
 static umf_memory_provider_ops_t UMF_FILE_MEMORY_PROVIDER_OPS = {
     .version = UMF_VERSION_CURRENT,
     .initialize = file_initialize,
     .finalize = file_finalize,
     .alloc = file_alloc,
-    .free = file_free,
     .get_last_native_error = file_get_last_native_error,
     .get_recommended_page_size = file_get_recommended_page_size,
     .get_min_page_size = file_get_min_page_size,
@@ -861,110 +732,6 @@ static umf_memory_provider_ops_t UMF_FILE_MEMORY_PROVIDER_OPS = {
 
 umf_memory_provider_ops_t *umfFileMemoryProviderOps(void) {
     return &UMF_FILE_MEMORY_PROVIDER_OPS;
-}
-
-umf_result_t umfFileMemoryProviderParamsCreate(
-    umf_file_memory_provider_params_handle_t *hParams, const char *path) {
-    libumfInit();
-    if (hParams == NULL) {
-        LOG_ERR("File Memory Provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    if (path == NULL) {
-        LOG_ERR("File path is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    umf_file_memory_provider_params_handle_t params =
-        umf_ba_global_alloc(sizeof(*params));
-    if (params == NULL) {
-        LOG_ERR("allocating memory for File Memory Provider params failed");
-        return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-    }
-
-    params->path = NULL;
-    params->protection = UMF_PROTECTION_READ | UMF_PROTECTION_WRITE;
-    params->visibility = UMF_MEM_MAP_PRIVATE;
-
-    umf_result_t res = umfFileMemoryProviderParamsSetPath(params, path);
-    if (res != UMF_RESULT_SUCCESS) {
-        umf_ba_global_free(params);
-        return res;
-    }
-
-    *hParams = params;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfFileMemoryProviderParamsDestroy(
-    umf_file_memory_provider_params_handle_t hParams) {
-    if (hParams != NULL) {
-        umf_ba_global_free(hParams->path);
-        umf_ba_global_free(hParams);
-    }
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfFileMemoryProviderParamsSetPath(
-    umf_file_memory_provider_params_handle_t hParams, const char *path) {
-    if (hParams == NULL) {
-        LOG_ERR("File Memory Provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    if (path == NULL) {
-        LOG_ERR("File path is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    size_t len = strlen(path);
-    if (len == 0) {
-        LOG_ERR("File path is empty");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    len += 1; // for the null terminator
-    char *new_path = NULL;
-    new_path = umf_ba_global_alloc(len);
-    if (new_path == NULL) {
-        LOG_ERR("allocating memory for the file path failed");
-        return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-    }
-
-    strncpy(new_path, path, len);
-
-    umf_ba_global_free(hParams->path);
-    hParams->path = new_path;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfFileMemoryProviderParamsSetProtection(
-    umf_file_memory_provider_params_handle_t hParams, unsigned protection) {
-    if (hParams == NULL) {
-        LOG_ERR("File Memory Provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->protection = protection;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfFileMemoryProviderParamsSetVisibility(
-    umf_file_memory_provider_params_handle_t hParams,
-    umf_memory_visibility_t visibility) {
-    if (hParams == NULL) {
-        LOG_ERR("File Memory Provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->visibility = visibility;
-
-    return UMF_RESULT_SUCCESS;
 }
 
 #endif // !defined(_WIN32) && !defined(UMF_NO_HWLOC)

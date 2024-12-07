@@ -67,8 +67,6 @@ static void umf_ba_create_global(void) {
 
     size_t smallestSize = BASE_ALLOC.ac_sizes[0];
     BASE_ALLOC.smallest_ac_size_log2 = log2Utils(smallestSize);
-
-    LOG_DEBUG("UMF base allocator created");
 }
 
 // returns index of the allocation class for a given size
@@ -98,12 +96,8 @@ static void *add_metadata_and_align(void *ptr, size_t size, size_t alignment) {
     if (alignment <= ALLOC_METADATA_SIZE) {
         user_ptr = (void *)((uintptr_t)ptr + ALLOC_METADATA_SIZE);
     } else {
-        user_ptr = (void *)ALIGN_UP_SAFE((uintptr_t)ptr + ALLOC_METADATA_SIZE,
-                                         alignment);
-        if (!user_ptr) {
-            LOG_ERR("base_alloc: pointer alignment overflow");
-            return NULL;
-        }
+        user_ptr =
+            (void *)ALIGN_UP((uintptr_t)ptr + ALLOC_METADATA_SIZE, alignment);
     }
 
     size_t ptr_offset_from_original = (uintptr_t)user_ptr - (uintptr_t)ptr;
@@ -161,19 +155,10 @@ void *umf_ba_global_aligned_alloc(size_t size, size_t alignment) {
         return NULL;
     }
 
-    if (size > SIZE_MAX - ALLOC_METADATA_SIZE) {
-        LOG_ERR("base_alloc: allocation size (%zu) too large.", size);
-        return NULL;
-    }
-
     // for metadata
     size += ALLOC_METADATA_SIZE;
 
     if (alignment > ALLOC_METADATA_SIZE) {
-        if (size > SIZE_MAX - alignment) {
-            LOG_ERR("base_alloc: allocation size (%zu) too large.", size);
-            return NULL;
-        }
         size += alignment;
     }
 

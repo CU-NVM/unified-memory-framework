@@ -12,98 +12,12 @@
 #include <umf/providers/provider_level_zero.h>
 
 #include "ipcFixtures.hpp"
+#include "level_zero_helpers.h"
 #include "pool.hpp"
-#include "utils_level_zero.h"
 #include "utils_load_library.h"
 
 using umf_test::test;
 using namespace umf_test;
-
-class LevelZeroTestHelper {
-  public:
-    LevelZeroTestHelper();
-
-    ~LevelZeroTestHelper() {
-        if (hContext_) {
-            utils_ze_destroy_context(hContext_);
-        }
-    }
-
-    ze_context_handle_t get_test_context() const { return hContext_; }
-
-    ze_device_handle_t get_test_device() const { return hDevice_; }
-
-  private:
-    ze_driver_handle_t hDriver_ = nullptr;
-    ze_context_handle_t hContext_ = nullptr;
-    ze_device_handle_t hDevice_ = nullptr;
-};
-
-LevelZeroTestHelper::LevelZeroTestHelper() {
-    uint32_t driver_idx = 0;
-
-    int ret = utils_ze_find_driver_with_gpu(&driver_idx, &hDriver_);
-    if (ret != 0 || hDriver_ == NULL) {
-        fprintf(stderr, "utils_ze_find_driver_with_gpu() failed!\n");
-        return;
-    }
-
-    ret = utils_ze_find_gpu_device(hDriver_, &hDevice_);
-    if (ret != 0 || hDevice_ == NULL) {
-        fprintf(stderr, "utils_ze_find_gpu_device() failed!\n");
-        return;
-    }
-
-    ret = utils_ze_create_context(hDriver_, &hContext_);
-    if (ret != 0) {
-        fprintf(stderr, "utils_ze_create_context() failed!\n");
-        return;
-    }
-}
-
-using level_zero_params_unique_handle_t =
-    std::unique_ptr<umf_level_zero_memory_provider_params_t,
-                    decltype(&umfLevelZeroMemoryProviderParamsDestroy)>;
-
-level_zero_params_unique_handle_t
-create_level_zero_prov_params(ze_context_handle_t context,
-                              ze_device_handle_t device,
-                              umf_usm_memory_type_t memory_type) {
-    umf_level_zero_memory_provider_params_handle_t params = nullptr;
-
-    umf_result_t res = umfLevelZeroMemoryProviderParamsCreate(&params);
-    if (res != UMF_RESULT_SUCCESS) {
-        return level_zero_params_unique_handle_t(
-            nullptr, &umfLevelZeroMemoryProviderParamsDestroy);
-    }
-
-    res = umfLevelZeroMemoryProviderParamsSetContext(params, context);
-    if (res != UMF_RESULT_SUCCESS) {
-        umfLevelZeroMemoryProviderParamsDestroy(params);
-        return level_zero_params_unique_handle_t(
-            nullptr, &umfLevelZeroMemoryProviderParamsDestroy);
-        ;
-    }
-
-    res = umfLevelZeroMemoryProviderParamsSetDevice(params, device);
-    if (res != UMF_RESULT_SUCCESS) {
-        umfLevelZeroMemoryProviderParamsDestroy(params);
-        return level_zero_params_unique_handle_t(
-            nullptr, &umfLevelZeroMemoryProviderParamsDestroy);
-        ;
-    }
-
-    res = umfLevelZeroMemoryProviderParamsSetMemoryType(params, memory_type);
-    if (res != UMF_RESULT_SUCCESS) {
-        umfLevelZeroMemoryProviderParamsDestroy(params);
-        return level_zero_params_unique_handle_t(
-            nullptr, &umfLevelZeroMemoryProviderParamsDestroy);
-        ;
-    }
-
-    return level_zero_params_unique_handle_t(
-        params, &umfLevelZeroMemoryProviderParamsDestroy);
-}
 
 struct LevelZeroProviderInit
     : public test,
@@ -114,32 +28,18 @@ INSTANTIATE_TEST_SUITE_P(, LevelZeroProviderInit,
                                            UMF_MEMORY_TYPE_DEVICE,
                                            UMF_MEMORY_TYPE_SHARED));
 
-LevelZeroTestHelper l0TestHelper;
-
 TEST_P(LevelZeroProviderInit, FailNullContext) {
     umf_memory_provider_ops_t *ops = umfLevelZeroMemoryProviderOps();
     ASSERT_NE(ops, nullptr);
 
     auto memory_type = GetParam();
 
-    umf_level_zero_memory_provider_params_handle_t hParams = nullptr;
-    umf_result_t result = umfLevelZeroMemoryProviderParamsCreate(&hParams);
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-    result =
-        umfLevelZeroMemoryProviderParamsSetMemoryType(hParams, memory_type);
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-    result = umfLevelZeroMemoryProviderParamsSetDevice(
-        hParams, l0TestHelper.get_test_device());
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-
-    result = umfLevelZeroMemoryProviderParamsSetContext(hParams, nullptr);
-    ASSERT_EQ(result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
+    level_zero_memory_provider_params_t params = {nullptr, nullptr, memory_type,
+                                                  nullptr, 0};
 
     umf_memory_provider_handle_t provider = nullptr;
-    result = umfMemoryProviderCreate(ops, hParams, &provider);
+    umf_result_t result = umfMemoryProviderCreate(ops, &params, &provider);
     ASSERT_EQ(result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-
-    umfLevelZeroMemoryProviderParamsDestroy(hParams);
 }
 
 TEST_P(LevelZeroProviderInit, FailNullDevice) {
@@ -151,21 +51,12 @@ TEST_P(LevelZeroProviderInit, FailNullDevice) {
     ASSERT_NE(ops, nullptr);
 
     auto memory_type = GetParam();
-    umf_level_zero_memory_provider_params_handle_t hParams = nullptr;
-    umf_result_t result = umfLevelZeroMemoryProviderParamsCreate(&hParams);
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-    result =
-        umfLevelZeroMemoryProviderParamsSetMemoryType(hParams, memory_type);
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-    result = umfLevelZeroMemoryProviderParamsSetContext(
-        hParams, l0TestHelper.get_test_context());
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
+    auto params = create_level_zero_prov_params(memory_type);
+    params.level_zero_device_handle = nullptr;
 
     umf_memory_provider_handle_t provider = nullptr;
-    result = umfMemoryProviderCreate(ops, hParams, &provider);
+    umf_result_t result = umfMemoryProviderCreate(ops, &params, &provider);
     ASSERT_EQ(result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-
-    umfLevelZeroMemoryProviderParamsDestroy(hParams);
 }
 
 TEST_F(test, FailNonNullDevice) {
@@ -174,39 +65,41 @@ TEST_F(test, FailNonNullDevice) {
 
     auto memory_type = UMF_MEMORY_TYPE_HOST;
 
-    umf_level_zero_memory_provider_params_handle_t hParams = nullptr;
-    umf_result_t result = umfLevelZeroMemoryProviderParamsCreate(&hParams);
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-    result =
-        umfLevelZeroMemoryProviderParamsSetMemoryType(hParams, memory_type);
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-    result = umfLevelZeroMemoryProviderParamsSetContext(
-        hParams, l0TestHelper.get_test_context());
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
-    result = umfLevelZeroMemoryProviderParamsSetDevice(
-        hParams, l0TestHelper.get_test_device());
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
+    // prepare params for device to get non-null device handle
+    auto params = create_level_zero_prov_params(UMF_MEMORY_TYPE_DEVICE);
+    params.memory_type = memory_type;
 
     umf_memory_provider_handle_t provider = nullptr;
-    result = umfMemoryProviderCreate(ops, hParams, &provider);
+    umf_result_t result = umfMemoryProviderCreate(ops, &params, &provider);
     ASSERT_EQ(result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-
-    umfLevelZeroMemoryProviderParamsDestroy(hParams);
 }
 
 TEST_F(test, FailMismatchedResidentHandlesCount) {
     umf_memory_provider_ops_t *ops = umfLevelZeroMemoryProviderOps();
     ASSERT_NE(ops, nullptr);
 
-    umf_level_zero_memory_provider_params_handle_t hParams = nullptr;
-    umf_result_t result = umfLevelZeroMemoryProviderParamsCreate(&hParams);
-    ASSERT_EQ(result, UMF_RESULT_SUCCESS);
+    auto memory_type = UMF_MEMORY_TYPE_DEVICE;
 
-    result = umfLevelZeroMemoryProviderParamsSetResidentDevices(hParams,
-                                                                nullptr, 99);
+    auto params = create_level_zero_prov_params(memory_type);
+    params.resident_device_count = 99;
+
+    umf_memory_provider_handle_t provider = nullptr;
+    umf_result_t result = umfMemoryProviderCreate(ops, &params, &provider);
     ASSERT_EQ(result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
+}
 
-    umfLevelZeroMemoryProviderParamsDestroy(hParams);
+TEST_F(test, FailMismatchedResidentHandlesPtr) {
+    umf_memory_provider_ops_t *ops = umfLevelZeroMemoryProviderOps();
+    ASSERT_NE(ops, nullptr);
+
+    auto memory_type = UMF_MEMORY_TYPE_DEVICE;
+
+    auto params = create_level_zero_prov_params(memory_type);
+    params.resident_device_handles = &params.level_zero_device_handle;
+
+    umf_memory_provider_handle_t provider = nullptr;
+    umf_result_t result = umfMemoryProviderCreate(ops, &params, &provider);
+    ASSERT_EQ(result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
 }
 
 class LevelZeroMemoryAccessor : public MemoryAccessor {
@@ -218,8 +111,8 @@ class LevelZeroMemoryAccessor : public MemoryAccessor {
               size_t pattern_size) {
         ASSERT_NE(ptr, nullptr);
 
-        int ret = utils_ze_level_zero_fill(hContext_, hDevice_, ptr, size,
-                                           pattern, pattern_size);
+        int ret = level_zero_fill(hContext_, hDevice_, ptr, size, pattern,
+                                  pattern_size);
         ASSERT_EQ(ret, 0);
     }
 
@@ -227,8 +120,7 @@ class LevelZeroMemoryAccessor : public MemoryAccessor {
         ASSERT_NE(dst_ptr, nullptr);
         ASSERT_NE(src_ptr, nullptr);
 
-        int ret = utils_ze_level_zero_copy(hContext_, hDevice_, dst_ptr,
-                                           src_ptr, size);
+        int ret = level_zero_copy(hContext_, hDevice_, dst_ptr, src_ptr, size);
         ASSERT_EQ(ret, 0);
     }
 
@@ -238,8 +130,7 @@ class LevelZeroMemoryAccessor : public MemoryAccessor {
 };
 
 using LevelZeroProviderTestParams =
-    std::tuple<umf_level_zero_memory_provider_params_handle_t,
-               ze_context_handle_t, umf_usm_memory_type_t, MemoryAccessor *>;
+    std::tuple<level_zero_memory_provider_params_t, MemoryAccessor *>;
 
 struct umfLevelZeroProviderTest
     : umf_test::test,
@@ -248,14 +139,14 @@ struct umfLevelZeroProviderTest
     void SetUp() override {
         test::SetUp();
 
-        auto [l0_params, ze_context, memory_type, accessor] = this->GetParam();
+        auto [l0_params, accessor] = this->GetParam();
         params = l0_params;
         memAccessor = accessor;
-        hContext = ze_context;
+        hContext = (ze_context_handle_t)params.level_zero_context_handle;
 
         ASSERT_NE(hContext, nullptr);
 
-        switch (memory_type) {
+        switch (params.memory_type) {
         case UMF_MEMORY_TYPE_DEVICE:
             zeMemoryTypeExpected = ZE_MEMORY_TYPE_DEVICE;
             break;
@@ -275,7 +166,7 @@ struct umfLevelZeroProviderTest
 
     void TearDown() override { test::TearDown(); }
 
-    umf_level_zero_memory_provider_params_handle_t params;
+    level_zero_memory_provider_params_t params;
     MemoryAccessor *memAccessor = nullptr;
     ze_context_handle_t hContext = nullptr;
     ze_memory_type_t zeMemoryTypeExpected = ZE_MEMORY_TYPE_UNKNOWN;
@@ -290,7 +181,7 @@ TEST_P(umfLevelZeroProviderTest, basic) {
     // create Level Zero provider
     umf_memory_provider_handle_t provider = nullptr;
     umf_result_t umf_result = umfMemoryProviderCreate(
-        umfLevelZeroMemoryProviderOps(), params, &provider);
+        umfLevelZeroMemoryProviderOps(), &params, &provider);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
     ASSERT_NE(provider, nullptr);
 
@@ -302,7 +193,7 @@ TEST_P(umfLevelZeroProviderTest, basic) {
     // use the allocated memory - fill it with a 0xAB pattern
     memAccessor->fill(ptr, size, &pattern, sizeof(pattern));
 
-    ze_memory_type_t zeMemoryTypeActual = utils_ze_get_mem_type(hContext, ptr);
+    ze_memory_type_t zeMemoryTypeActual = get_mem_type(hContext, ptr);
     ASSERT_EQ(zeMemoryTypeActual, zeMemoryTypeExpected);
 
     // check if the pattern was successfully applied
@@ -322,7 +213,7 @@ TEST_P(umfLevelZeroProviderTest, basic) {
 TEST_P(umfLevelZeroProviderTest, getPageSize) {
     umf_memory_provider_handle_t provider = nullptr;
     umf_result_t umf_result = umfMemoryProviderCreate(
-        umfLevelZeroMemoryProviderOps(), params, &provider);
+        umfLevelZeroMemoryProviderOps(), &params, &provider);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
     ASSERT_NE(provider, nullptr);
 
@@ -346,7 +237,7 @@ TEST_P(umfLevelZeroProviderTest, getPageSize) {
 TEST_P(umfLevelZeroProviderTest, getName) {
     umf_memory_provider_handle_t provider = nullptr;
     umf_result_t umf_result = umfMemoryProviderCreate(
-        umfLevelZeroMemoryProviderOps(), params, &provider);
+        umfLevelZeroMemoryProviderOps(), &params, &provider);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
     ASSERT_NE(provider, nullptr);
 
@@ -359,18 +250,27 @@ TEST_P(umfLevelZeroProviderTest, getName) {
 TEST_P(umfLevelZeroProviderTest, allocInvalidSize) {
     umf_memory_provider_handle_t provider = nullptr;
     umf_result_t umf_result = umfMemoryProviderCreate(
-        umfLevelZeroMemoryProviderOps(), params, &provider);
+        umfLevelZeroMemoryProviderOps(), &params, &provider);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
     ASSERT_NE(provider, nullptr);
 
+    // try to alloc (int)-1
     void *ptr = nullptr;
-    umf_result = umfMemoryProviderAlloc(
-        provider, std::numeric_limits<size_t>::max(), 0, &ptr);
+    umf_result = umfMemoryProviderAlloc(provider, -1, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC);
     const char *message;
     int32_t error;
     umfMemoryProviderGetLastNativeError(provider, &message, &error);
     ASSERT_EQ(error, ZE_RESULT_ERROR_UNSUPPORTED_SIZE);
+
+    // in case of size == 0 we should got INVALID_ARGUMENT error
+    // NOTE: this is invalid only for the DEVICE or SHARED allocations
+    if (params.memory_type != UMF_MEMORY_TYPE_HOST) {
+        umf_result = umfMemoryProviderAlloc(provider, 0, 0, &ptr);
+        ASSERT_EQ(umf_result, UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC);
+        umfMemoryProviderGetLastNativeError(provider, &message, &error);
+        ASSERT_EQ(error, ZE_RESULT_ERROR_UNSUPPORTED_SIZE);
+    }
 
     umfMemoryProviderDestroy(provider);
 }
@@ -381,14 +281,14 @@ TEST_P(umfLevelZeroProviderTest, providerCreateInvalidArgs) {
         umfLevelZeroMemoryProviderOps(), nullptr, &provider);
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
 
-    umf_result = umfMemoryProviderCreate(nullptr, params, nullptr);
+    umf_result = umfMemoryProviderCreate(nullptr, &params, nullptr);
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
 }
 
 TEST_P(umfLevelZeroProviderTest, getPageSizeInvalidArgs) {
     umf_memory_provider_handle_t provider = nullptr;
     umf_result_t umf_result = umfMemoryProviderCreate(
-        umfLevelZeroMemoryProviderOps(), params, &provider);
+        umfLevelZeroMemoryProviderOps(), &params, &provider);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
     ASSERT_NE(provider, nullptr);
 
@@ -401,53 +301,27 @@ TEST_P(umfLevelZeroProviderTest, getPageSizeInvalidArgs) {
     umfMemoryProviderDestroy(provider);
 }
 
-TEST_P(umfLevelZeroProviderTest, levelZeroProviderNullParams) {
-    umf_result_t res = umfLevelZeroMemoryProviderParamsCreate(nullptr);
-    EXPECT_EQ(res, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-
-    res = umfLevelZeroMemoryProviderParamsSetContext(nullptr, hContext);
-    EXPECT_EQ(res, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-
-    res = umfLevelZeroMemoryProviderParamsSetDevice(nullptr, nullptr);
-    EXPECT_EQ(res, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-
-    res = umfLevelZeroMemoryProviderParamsSetMemoryType(nullptr,
-                                                        UMF_MEMORY_TYPE_DEVICE);
-    EXPECT_EQ(res, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-}
-
 // TODO add tests that mixes Level Zero Memory Provider and Disjoint Pool
 
-level_zero_params_unique_handle_t l0Params_device_memory =
-    create_level_zero_prov_params(l0TestHelper.get_test_context(),
-                                  l0TestHelper.get_test_device(),
-                                  UMF_MEMORY_TYPE_DEVICE);
-level_zero_params_unique_handle_t l0Params_shared_memory =
-    create_level_zero_prov_params(l0TestHelper.get_test_context(),
-                                  l0TestHelper.get_test_device(),
-                                  UMF_MEMORY_TYPE_SHARED);
-level_zero_params_unique_handle_t l0Params_host_memory =
-    create_level_zero_prov_params(l0TestHelper.get_test_context(), nullptr,
-                                  UMF_MEMORY_TYPE_HOST);
+level_zero_memory_provider_params_t l0Params_device_memory =
+    create_level_zero_prov_params(UMF_MEMORY_TYPE_DEVICE);
+level_zero_memory_provider_params_t l0Params_shared_memory =
+    create_level_zero_prov_params(UMF_MEMORY_TYPE_SHARED);
+level_zero_memory_provider_params_t l0Params_host_memory =
+    create_level_zero_prov_params(UMF_MEMORY_TYPE_HOST);
 
-LevelZeroMemoryAccessor
-    l0Accessor((ze_context_handle_t)l0TestHelper.get_test_context(),
-               (ze_device_handle_t)l0TestHelper.get_test_device());
+LevelZeroMemoryAccessor l0Accessor(
+    (ze_context_handle_t)l0Params_device_memory.level_zero_context_handle,
+    (ze_device_handle_t)l0Params_device_memory.level_zero_device_handle);
 
 HostMemoryAccessor hostAccessor;
 
 INSTANTIATE_TEST_SUITE_P(
     umfLevelZeroProviderTestSuite, umfLevelZeroProviderTest,
     ::testing::Values(
-        LevelZeroProviderTestParams{l0Params_device_memory.get(),
-                                    l0TestHelper.get_test_context(),
-                                    UMF_MEMORY_TYPE_DEVICE, &l0Accessor},
-        LevelZeroProviderTestParams{l0Params_shared_memory.get(),
-                                    l0TestHelper.get_test_context(),
-                                    UMF_MEMORY_TYPE_SHARED, &hostAccessor},
-        LevelZeroProviderTestParams{l0Params_host_memory.get(),
-                                    l0TestHelper.get_test_context(),
-                                    UMF_MEMORY_TYPE_HOST, &hostAccessor}));
+        LevelZeroProviderTestParams{l0Params_device_memory, &l0Accessor},
+        LevelZeroProviderTestParams{l0Params_shared_memory, &hostAccessor},
+        LevelZeroProviderTestParams{l0Params_host_memory, &hostAccessor}));
 
 // TODO: it looks like there is some problem with IPC implementation in Level
 // Zero on windows. Issue: #494
@@ -458,5 +332,5 @@ INSTANTIATE_TEST_SUITE_P(umfLevelZeroProviderTestSuite, umfIpcTest,
                          ::testing::Values(ipcTestParams{
                              umfProxyPoolOps(), nullptr,
                              umfLevelZeroMemoryProviderOps(),
-                             l0Params_device_memory.get(), &l0Accessor}));
+                             &l0Params_device_memory, &l0Accessor}));
 #endif

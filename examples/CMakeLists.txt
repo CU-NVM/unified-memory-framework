@@ -49,7 +49,6 @@ if(UMF_BUILD_GPU_EXAMPLES
     add_umf_executable(
         NAME ${EXAMPLE_NAME}
         SRCS level_zero_shared_memory/level_zero_shared_memory.c
-             common/examples_level_zero_helpers.c
         LIBS disjoint_pool ze_loader umf)
 
     target_include_directories(
@@ -128,7 +127,6 @@ if(UMF_BUILD_GPU_EXAMPLES
     add_umf_executable(
         NAME ${EXAMPLE_NAME}
         SRCS ipc_level_zero/ipc_level_zero.c
-             common/examples_level_zero_helpers.c
         LIBS disjoint_pool ze_loader umf)
 
     target_include_directories(
@@ -282,13 +280,10 @@ if(LINUX)
         add_umf_executable(
             NAME ${EXAMPLE_NAME}
             SRCS dram_and_fsdax/dram_and_fsdax.c
-            LIBS umf)
+            LIBS umf jemalloc_pool)
 
-        target_link_options(${EXAMPLE_NAME} PRIVATE "-Wl,--no-as-needed,-ldl")
-
-        target_link_directories(
-            ${EXAMPLE_NAME} PRIVATE ${LIBHWLOC_LIBRARY_DIRS}
-            ${JEMALLOC_LIBRARY_DIRS})
+        target_link_directories(${EXAMPLE_NAME} PRIVATE
+                                ${LIBHWLOC_LIBRARY_DIRS})
 
         add_test(
             NAME ${EXAMPLE_NAME}

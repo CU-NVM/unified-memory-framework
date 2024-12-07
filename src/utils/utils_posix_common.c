@@ -7,7 +7,6 @@
  *
  */
 
-#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -64,7 +63,8 @@ int utils_gettid(void) {
 
 int utils_close_fd(int fd) { return close(fd); }
 
-umf_result_t utils_errno_to_umf_result(int err) {
+#ifndef __APPLE__
+static umf_result_t errno_to_umf_result(int err) {
     switch (err) {
     case EBADF:
     case EINVAL:
@@ -82,6 +82,7 @@ umf_result_t utils_errno_to_umf_result(int err) {
         return UMF_RESULT_ERROR_UNKNOWN;
     }
 }
+#endif
 
 umf_result_t utils_duplicate_fd(int pid, int fd_in, int *fd_out) {
 #ifdef __APPLE__
@@ -100,14 +101,14 @@ umf_result_t utils_duplicate_fd(int pid, int fd_in, int *fd_out) {
     int pid_fd = syscall(__NR_pidfd_open, pid, 0);
     if (pid_fd == -1) {
         LOG_PERR("__NR_pidfd_open");
-        return utils_errno_to_umf_result(errno);
+        return errno_to_umf_result(errno);
     }
 
     int fd_dup = syscall(__NR_pidfd_getfd, pid_fd, fd_in, 0);
     close(pid_fd);
     if (fd_dup == -1) {
         LOG_PERR("__NR_pidfd_open");
-        return utils_errno_to_umf_result(errno);
+        return errno_to_umf_result(errno);
     }
 
     *fd_out = fd_dup;
@@ -145,15 +146,14 @@ umf_result_t utils_translate_mem_protection_flags(unsigned in_protection,
                                  out_protection);
 }
 
-int utils_translate_purge_advise(umf_purge_advise_t advise) {
+static int utils_translate_purge_advise(umf_purge_advise_t advise) {
     switch (advise) {
     case UMF_PURGE_LAZY:
         return MADV_FREE;
     case UMF_PURGE_FORCE:
         return MADV_DONTNEED;
-    default:
-        return -1;
     }
+    return -1;
 }
 
 void *utils_mmap(void *hint_addr, size_t length, int prot, int flag, int fd,
@@ -265,28 +265,4 @@ int utils_file_open_or_create(const char *path) {
     LOG_DEBUG("opened/created the file: %s", path);
 
     return fd;
-}
-
-// Expected input:
-// char *str_threshold = utils_env_var_get_str("UMF_PROXY", "size.threshold=");
-long utils_get_size_threshold(char *str_threshold) {
-    if (!str_threshold) {
-        return 0;
-    }
-
-    // move to the beginning of the number
-    str_threshold += strlen("size.threshold=");
-
-    // check if the first character is a digit
-    if (!isdigit(str_threshold[0])) {
-        LOG_ERR("incorrect size threshold, expected numerical value >=0: %s",
-                str_threshold);
-        return -1;
-    }
-
-    size_t threshold = atol(str_threshold);
-    LOG_DEBUG("Size_threshold_value = (char *) %s, (size_t) %zu", str_threshold,
-              threshold);
-
-    return threshold;
 }

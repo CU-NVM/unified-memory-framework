@@ -1,7 +1,6 @@
 {
-   False-positive Race in jemalloc
+   Race in libjemalloc.so  - internal issue of libjemalloc
    Helgrind:Race
-   ...
-   fun:je_*
+   obj:*libjemalloc.so*
    ...
 }

@@ -11,7 +11,6 @@
 #define UMF_COMMON_H 1
 
 #include <assert.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,10 +22,8 @@ extern "C" {
 #endif
 
 typedef enum umf_purge_advise_t {
-    UMF_PURGE_LAZY = 1,
+    UMF_PURGE_LAZY,
     UMF_PURGE_FORCE,
-
-    UMF_PURGE_MAX, // must be the last one
 } umf_purge_advise_t;
 
 #define DO_WHILE_EMPTY                                                         \
@@ -43,10 +40,6 @@ typedef enum umf_purge_advise_t {
 #define IS_NOT_ALIGNED(value, align)                                           \
     ((align != 0 && (((value) & ((align)-1)) != 0)))
 #define ALIGN_UP(value, align) (((value) + (align)-1) & ~((align)-1))
-#define ALIGN_UP_SAFE(value, align)                                            \
-    (((align) == 0)                                                            \
-         ? (value)                                                             \
-         : (((value) + (align)-1) < (value) ? 0 : ALIGN_UP((value), (align))))
 #define ALIGN_DOWN(value, align) ((value) & ~((align)-1))
 #define ASSERT_IS_ALIGNED(value, align)                                        \
     DO_WHILE_EXPRS(assert(IS_ALIGNED(value, align)))
@@ -64,26 +57,8 @@ typedef enum umf_purge_advise_t {
 
 #endif /* _WIN32 */
 
-// get the address of the given string in the environment variable (or NULL)
-char *utils_env_var_get_str(const char *envvar, const char *str);
-
 // Check if the environment variable contains the given string.
-static inline int utils_env_var_has_str(const char *envvar, const char *str) {
-    return utils_env_var_get_str(envvar, str) ? 1 : 0;
-}
-
-// check if we are running in the proxy library
-static inline int utils_is_running_in_proxy_lib(void) {
-    return utils_env_var_get_str("LD_PRELOAD", "libumf_proxy.so") ? 1 : 0;
-}
-
-// check if we are running in the proxy library with a size threshold
-static inline int utils_is_running_in_proxy_lib_with_size_threshold(void) {
-    return (utils_env_var_get_str("LD_PRELOAD", "libumf_proxy.so") &&
-            utils_env_var_get_str("UMF_PROXY", "size.threshold="))
-               ? 1
-               : 0;
-}
+int utils_env_var_has_str(const char *envvar, const char *str);
 
 // utils_parse_var - Parses var for a prefix,
 //                   optionally identifying a following argument.
@@ -102,6 +77,9 @@ static inline int utils_is_running_in_proxy_lib_with_size_threshold(void) {
 const char *utils_parse_var(const char *var, const char *option,
                             const char **extraArg);
 
+// check if we are running in the proxy library
+int utils_is_running_in_proxy_lib(void);
+
 size_t utils_get_page_size(void);
 
 // align a pointer up and a size down
@@ -119,8 +97,6 @@ int utils_gettid(void);
 // close file descriptor
 int utils_close_fd(int fd);
 
-umf_result_t utils_errno_to_umf_result(int err);
-
 // obtain a duplicate of another process's file descriptor
 umf_result_t utils_duplicate_fd(int pid, int fd_in, int *fd_out);
 
@@ -133,8 +109,6 @@ umf_result_t utils_translate_flags(unsigned in_flags, unsigned max,
 
 umf_result_t utils_translate_mem_protection_flags(unsigned in_protection,
                                                   unsigned *out_protection);
-
-int utils_translate_purge_advise(umf_purge_advise_t advise);
 
 umf_result_t
 utils_translate_mem_visibility_flag(umf_memory_visibility_t in_flag,
@@ -158,7 +132,7 @@ void *utils_mmap(void *hint_addr, size_t length, int prot, int flag, int fd,
                  size_t fd_offset);
 
 void *utils_mmap_file(void *hint_addr, size_t length, int prot, int flags,
-                      int fd, size_t fd_offset, bool *map_sync);
+                      int fd, size_t fd_offset);
 
 int utils_munmap(void *addr, size_t length);
 
@@ -173,8 +147,6 @@ int utils_file_open(const char *path);
 int utils_file_open_or_create(const char *path);
 
 int utils_fallocate(int fd, long offset, long len);
-
-long utils_get_size_threshold(char *str_threshold);
 
 #ifdef __cplusplus
 }

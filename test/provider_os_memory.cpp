@@ -9,13 +9,8 @@
 #include "test_helpers.h"
 
 #include <umf/memory_provider.h>
-#include <umf/providers/provider_os_memory.h>
-#if (defined UMF_POOL_DISJOINT_ENABLED)
 #include <umf/pools/pool_disjoint.h>
-#endif
-#ifdef UMF_POOL_JEMALLOC_ENABLED
-#include <umf/pools/pool_jemalloc.h>
-#endif
+#include <umf/providers/provider_os_memory.h>
 
 using umf_test::test;
 
@@ -138,23 +133,16 @@ static umf_result_t create_os_provider_with_mode(umf_numa_mode_t mode,
                                                  unsigned node_list_size) {
     umf_result_t umf_result;
     umf_memory_provider_handle_t os_memory_provider = nullptr;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        umfOsMemoryProviderParamsDefault();
 
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    EXPECT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    os_memory_provider_params.numa_mode = mode;
+    os_memory_provider_params.numa_list = node_list;
+    os_memory_provider_params.numa_list_len = node_list_size;
 
-    umf_result =
-        umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params, mode);
-    EXPECT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, node_list, node_list_size);
-    EXPECT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result =
-        umfMemoryProviderCreate(umfOsMemoryProviderOps(),
-                                os_memory_provider_params, &os_memory_provider);
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
+    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
+                                         &os_memory_provider_params,
+                                         &os_memory_provider);
     if (umf_result == UMF_RESULT_SUCCESS) {
         EXPECT_NE(os_memory_provider, nullptr);
         umfMemoryProviderDestroy(os_memory_provider);
@@ -200,28 +188,18 @@ TEST_F(test, create_ZERO_WEIGHT_PARTITION) {
     umf_numa_split_partition_t p = {0, 0};
     umf_result_t umf_result;
     umf_memory_provider_handle_t os_memory_provider = nullptr;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = NULL;
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        umfOsMemoryProviderParamsDefault();
 
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    EXPECT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_SPLIT);
-    EXPECT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, &valid_list, valid_list_len);
-    EXPECT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetPartitions(
-        os_memory_provider_params, &p, 1);
-    EXPECT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_SPLIT;
+    os_memory_provider_params.numa_list = &valid_list;
+    os_memory_provider_params.numa_list_len = valid_list_len;
+    os_memory_provider_params.partitions = &p;
+    os_memory_provider_params.partitions_len = 1;
 
     umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
                                          &os_memory_provider_params,
                                          &os_memory_provider);
-
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
 
     EXPECT_EQ(os_memory_provider, nullptr);
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
@@ -229,24 +207,10 @@ TEST_F(test, create_ZERO_WEIGHT_PARTITION) {
 
 // positive tests using test_alloc_free_success
 
-using os_params_unique_handle_t =
-    std::unique_ptr<umf_os_memory_provider_params_t,
-                    decltype(&umfOsMemoryProviderParamsDestroy)>;
-
-os_params_unique_handle_t createOsMemoryProviderParams() {
-    umf_os_memory_provider_params_handle_t params = nullptr;
-    umf_result_t res = umfOsMemoryProviderParamsCreate(&params);
-    if (res != UMF_RESULT_SUCCESS) {
-        throw std::runtime_error("Failed to create os memory provider params");
-    }
-
-    return os_params_unique_handle_t(params, &umfOsMemoryProviderParamsDestroy);
-}
-auto defaultParams = createOsMemoryProviderParams();
-
+auto defaultParams = umfOsMemoryProviderParamsDefault();
 INSTANTIATE_TEST_SUITE_P(osProviderTest, umfProviderTest,
                          ::testing::Values(providerCreateExtParams{
-                             umfOsMemoryProviderOps(), defaultParams.get()}));
+                             umfOsMemoryProviderOps(), &defaultParams}));
 
 TEST_P(umfProviderTest, create_destroy) {}
 
@@ -292,12 +256,6 @@ TEST_P(umfProviderTest, alloc_page64_align_one_half_pages_WRONG_ALIGNMENT_2) {
 
 TEST_P(umfProviderTest, alloc_WRONG_SIZE) {
     test_alloc_failure(provider.get(), -1, 0,
-                       UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC,
-                       UMF_OS_RESULT_ERROR_ALLOC_FAILED);
-}
-
-TEST_P(umfProviderTest, alloc_MAX_SIZE) {
-    test_alloc_failure(provider.get(), SIZE_MAX, 0,
                        UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC,
                        UMF_OS_RESULT_ERROR_ALLOC_FAILED);
 }
@@ -407,73 +365,29 @@ TEST_P(umfProviderTest, close_ipc_handle_wrong_visibility) {
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(umfIpcTest);
 
-using os_params_unique_handle_t =
-    std::unique_ptr<umf_os_memory_provider_params_t,
-                    decltype(&umfOsMemoryProviderParamsDestroy)>;
-
-os_params_unique_handle_t osMemoryProviderParamsShared() {
-    umf_os_memory_provider_params_handle_t params = nullptr;
-    umf_result_t res = umfOsMemoryProviderParamsCreate(&params);
-    if (res != UMF_RESULT_SUCCESS) {
-        throw std::runtime_error("Failed to create os memory provider params");
-    }
-    res = umfOsMemoryProviderParamsSetVisibility(params, UMF_MEM_MAP_SHARED);
-    if (res != UMF_RESULT_SUCCESS) {
-        throw std::runtime_error("Failed to set protection");
-    }
-
-    return os_params_unique_handle_t(params, &umfOsMemoryProviderParamsDestroy);
+umf_os_memory_provider_params_t osMemoryProviderParamsShared() {
+    auto params = umfOsMemoryProviderParamsDefault();
+    params.visibility = UMF_MEM_MAP_SHARED;
+    return params;
 }
 auto os_params = osMemoryProviderParamsShared();
 
 HostMemoryAccessor hostAccessor;
 
-#if (defined UMF_POOL_DISJOINT_ENABLED)
-using disjoint_params_unique_handle_t =
-    std::unique_ptr<umf_disjoint_pool_params_t,
-                    decltype(&umfDisjointPoolParamsDestroy)>;
-
-disjoint_params_unique_handle_t disjointPoolParams() {
-    umf_disjoint_pool_params_handle_t params = nullptr;
-    umf_result_t res = umfDisjointPoolParamsCreate(&params);
-    if (res != UMF_RESULT_SUCCESS) {
-        throw std::runtime_error("Failed to create pool params");
-    }
-    res = umfDisjointPoolParamsSetSlabMinSize(params, 4096);
-    if (res != UMF_RESULT_SUCCESS) {
-        umfDisjointPoolParamsDestroy(params);
-        throw std::runtime_error("Failed to set slab min size");
-    }
-    res = umfDisjointPoolParamsSetMaxPoolableSize(params, 4096);
-    if (res != UMF_RESULT_SUCCESS) {
-        umfDisjointPoolParamsDestroy(params);
-        throw std::runtime_error("Failed to set max poolable size");
-    }
-    res = umfDisjointPoolParamsSetCapacity(params, 4);
-    if (res != UMF_RESULT_SUCCESS) {
-        umfDisjointPoolParamsDestroy(params);
-        throw std::runtime_error("Failed to set capacity");
-    }
-    res = umfDisjointPoolParamsSetMinBucketSize(params, 64);
-    if (res != UMF_RESULT_SUCCESS) {
-        umfDisjointPoolParamsDestroy(params);
-        throw std::runtime_error("Failed to set min bucket size");
-    }
-
-    return disjoint_params_unique_handle_t(params,
-                                           &umfDisjointPoolParamsDestroy);
+umf_disjoint_pool_params_t disjointPoolParams() {
+    umf_disjoint_pool_params_t params = umfDisjointPoolParamsDefault();
+    params.SlabMinSize = 4096;
+    params.MaxPoolableSize = 4096;
+    params.Capacity = 4;
+    params.MinBucketSize = 64;
+    return params;
 }
-disjoint_params_unique_handle_t disjointParams = disjointPoolParams();
-#endif
+umf_disjoint_pool_params_t disjointParams = disjointPoolParams();
 
 static std::vector<ipcTestParams> ipcTestParamsList = {
 #if (defined UMF_POOL_DISJOINT_ENABLED)
-    {umfDisjointPoolOps(), disjointParams.get(), umfOsMemoryProviderOps(),
-     os_params.get(), &hostAccessor},
-#endif
-#ifdef UMF_POOL_JEMALLOC_ENABLED
-    {umfJemallocPoolOps(), nullptr, umfOsMemoryProviderOps(), os_params.get(),
-     &hostAccessor},
+    {umfDisjointPoolOps(), &disjointParams, umfOsMemoryProviderOps(),
+     &os_params, &hostAccessor},
 #endif
 };
 

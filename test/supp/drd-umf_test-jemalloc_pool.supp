@@ -1,7 +1,6 @@
 {
-   False-positive ConflictingAccess in jemalloc
+   Conflicting Access in libjemalloc.so - internal issue of libjemalloc
    drd:ConflictingAccess
-   ...
-   fun:je_*
+   obj:*libjemalloc.so*
    ...
 }

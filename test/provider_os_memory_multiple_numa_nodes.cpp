@@ -14,6 +14,9 @@
 
 #include <umf/providers/provider_os_memory.h>
 
+static umf_os_memory_provider_params_t UMF_OS_MEMORY_PROVIDER_PARAMS_TEST =
+    umfOsMemoryProviderParamsDefault();
+
 std::vector<unsigned> get_available_numa_nodes() {
     if (numa_available() == -1 || numa_all_nodes_ptr == nullptr) {
         return std::vector<unsigned>();
@@ -82,11 +85,11 @@ struct testNuma : testing::Test {
         ASSERT_NE(nodemask, nullptr);
     }
 
-    void initOsProvider(
-        umf_os_memory_provider_params_handle_t os_memory_provider_params) {
+    void
+    initOsProvider(umf_os_memory_provider_params_t os_memory_provider_params) {
         umf_result_t umf_result;
         umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
-                                             os_memory_provider_params,
+                                             &os_memory_provider_params,
                                              &os_memory_provider);
         ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
         ASSERT_NE(os_memory_provider, nullptr);
@@ -154,25 +157,16 @@ INSTANTIATE_TEST_SUITE_P(testNumaNodesAllocations, testNumaOnEachNode,
 TEST_P(testNumaOnEachNode, checkNumaNodesAllocations) {
     unsigned numa_node_number = GetParam();
     ASSERT_GE(numa_node_number, 0);
-    umf_result_t umf_result;
 
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaList(os_memory_provider_params,
-                                                      &numa_node_number, 1);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_BIND);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.numa_list = &numa_node_number;
+    os_memory_provider_params.numa_list_len = 1;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_BIND;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result =
         umfMemoryProviderAlloc(os_memory_provider, alloc_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -187,25 +181,16 @@ TEST_P(testNumaOnEachNode, checkNumaNodesAllocations) {
 // on each of the available numa nodes.
 TEST_P(testNumaOnEachNode, checkModePreferred) {
     unsigned numa_node_number = GetParam();
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaList(os_memory_provider_params,
-                                                      &numa_node_number, 1);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    os_memory_provider_params.numa_list = &numa_node_number;
     numa_bitmask_setbit(nodemask, numa_node_number);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_PREFERRED);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.numa_list_len = 1;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_PREFERRED;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result =
         umfMemoryProviderAlloc(os_memory_provider, alloc_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -222,19 +207,14 @@ TEST_P(testNumaOnEachNode, checkModePreferred) {
 TEST_P(testNumaOnEachNode, checkModeDefaultSetMempolicy) {
     unsigned numa_node_number = GetParam();
     numa_bitmask_setbit(nodemask, numa_node_number);
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
     initOsProvider(os_memory_provider_params);
-
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
 
     long ret = set_mempolicy(MPOL_BIND, nodemask->maskp, nodemask->size);
     ASSERT_EQ(ret, 0);
 
+    umf_result_t umf_result;
     umf_result =
         umfMemoryProviderAlloc(os_memory_provider, alloc_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -252,24 +232,15 @@ TEST_P(testNumaOnEachNode, checkModeInterleaveSingleNode) {
 
     constexpr int pages_num = 1024;
     size_t page_size = sysconf(_SC_PAGE_SIZE);
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaList(os_memory_provider_params,
-                                                      &numa_node_number, 1);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_INTERLEAVE);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.numa_list = &numa_node_number;
+    os_memory_provider_params.numa_list_len = 1;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_INTERLEAVE;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result = umfMemoryProviderAlloc(os_memory_provider,
                                         pages_num * page_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -311,20 +282,12 @@ TEST_P(testNumaOnEachCpu, checkModePreferredEmptyNodeset) {
 
     ASSERT_EQ(ret, 0);
 
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_PREFERRED);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_PREFERRED;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result =
         umfMemoryProviderAlloc(os_memory_provider, alloc_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -356,20 +319,12 @@ TEST_P(testNumaOnEachCpu, checkModeLocal) {
 
     ASSERT_EQ(ret, 0);
 
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_LOCAL);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_LOCAL;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result =
         umfMemoryProviderAlloc(os_memory_provider, alloc_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -392,16 +347,11 @@ TEST_P(testNumaOnEachCpu, checkModeLocal) {
 // default policy - it allocates pages on the node of the CPU that triggered
 // the allocation.
 TEST_F(testNuma, checkModeDefault) {
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result =
         umfMemoryProviderAlloc(os_memory_provider, alloc_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -421,27 +371,18 @@ TEST_F(testNuma, checkModeDefault) {
 TEST_F(testNuma, checkModeInterleave) {
     constexpr int pages_num = 1024;
     size_t page_size = sysconf(_SC_PAGE_SIZE);
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
     std::vector<unsigned> numa_nodes = get_available_numa_nodes();
     set_all_available_nodemask_bits(nodemask);
 
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, numa_nodes.data(), numa_nodes.size());
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_INTERLEAVE);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.numa_list = numa_nodes.data();
+    os_memory_provider_params.numa_list_len = numa_nodes.size();
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_INTERLEAVE;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result = umfMemoryProviderAlloc(os_memory_provider,
                                         pages_num * page_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -491,32 +432,20 @@ TEST_F(testNuma, checkModeInterleaveCustomPartSize) {
     ASSERT_GT(_page_size, 0);
     size_t page_size = _page_size;
     size_t part_size = page_size * 100;
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
     std::vector<unsigned> numa_nodes = get_available_numa_nodes();
 
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, numa_nodes.data(), numa_nodes.size());
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_INTERLEAVE);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.numa_list = numa_nodes.data();
+    os_memory_provider_params.numa_list_len = numa_nodes.size();
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_INTERLEAVE;
     // part size do not need to be multiple of page size
-    umf_result = umfOsMemoryProviderParamsSetPartSize(os_memory_provider_params,
-                                                      part_size - 1);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.part_size = part_size - 1;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
     size_t size = part_num * part_size;
+    umf_result_t umf_result;
     umf_result = umfMemoryProviderAlloc(os_memory_provider, size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
     ASSERT_NE(ptr, nullptr);
@@ -672,12 +601,9 @@ TEST_P(testNumaSplit, checkModeSplit) {
     ASSERT_GT(_page_size, 0);
     size_t page_size = _page_size;
     auto [required_numa_nodes, pages, in, out] = param;
-    umf_result_t umf_result;
 
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
     std::vector<unsigned> numa_nodes = get_available_numa_nodes();
 
@@ -696,24 +622,16 @@ TEST_P(testNumaSplit, checkModeSplit) {
                      numa_nodes.begin() + required_numa_nodes, g);
     }
 
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, numa_nodes.data(), required_numa_nodes);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    os_memory_provider_params.numa_list = numa_nodes.data();
+    os_memory_provider_params.numa_list_len = required_numa_nodes;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_SPLIT;
 
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_SPLIT);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetPartitions(
-        os_memory_provider_params, in.data(), in.size());
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.partitions = in.data();
+    os_memory_provider_params.partitions_len = in.size();
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
     size_t size = page_size * pages;
-
+    umf_result_t umf_result;
     umf_result = umfMemoryProviderAlloc(os_memory_provider, size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
     ASSERT_NE(ptr, nullptr);
@@ -747,26 +665,17 @@ TEST_P(testNumaSplit, checkModeSplit) {
 // Test for allocations on all numa nodes with BIND mode.
 // According to mbind it should go to the closest node.
 TEST_F(testNuma, checkModeBindOnAllNodes) {
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
     std::vector<unsigned> numa_nodes = get_available_numa_nodes();
 
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, numa_nodes.data(), numa_nodes.size());
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_BIND);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    os_memory_provider_params.numa_list = numa_nodes.data();
+    os_memory_provider_params.numa_list_len = numa_nodes.size();
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_BIND;
     initOsProvider(os_memory_provider_params);
 
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
+    umf_result_t umf_result;
     umf_result =
         umfMemoryProviderAlloc(os_memory_provider, alloc_size, 0, &ptr);
     ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
@@ -800,28 +709,19 @@ TEST_F(testNuma, checkModeBindOnAllNodes) {
 // Local mode enabled when numa_list is set.
 // For the local mode the nodeset must be empty.
 TEST_F(testNuma, checkModeLocalIllegalArgSet) {
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
     std::vector<unsigned> numa_nodes = get_available_numa_nodes();
 
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, numa_nodes.data(), numa_nodes.size());
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    os_memory_provider_params.numa_list = numa_nodes.data();
+    os_memory_provider_params.numa_list_len = numa_nodes.size();
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_LOCAL;
 
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_LOCAL);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
+    umf_result_t umf_result;
     umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
                                          &os_memory_provider_params,
                                          &os_memory_provider);
-
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
     ASSERT_EQ(os_memory_provider, nullptr);
 }
@@ -829,24 +729,18 @@ TEST_F(testNuma, checkModeLocalIllegalArgSet) {
 // Default mode enabled when numa_list is set.
 // For the default mode the nodeset must be empty.
 TEST_F(testNuma, checkModeDefaultIllegalArgSet) {
-    umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
 
     std::vector<unsigned> numa_nodes = get_available_numa_nodes();
 
-    umf_result = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, numa_nodes.data(), numa_nodes.size());
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
+    os_memory_provider_params.numa_list = numa_nodes.data();
+    os_memory_provider_params.numa_list_len = numa_nodes.size();
 
+    umf_result_t umf_result;
     umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
                                          &os_memory_provider_params,
                                          &os_memory_provider);
-
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
     ASSERT_EQ(os_memory_provider, nullptr);
 }
@@ -854,22 +748,14 @@ TEST_F(testNuma, checkModeDefaultIllegalArgSet) {
 // Bind mode enabled when numa_list is not set.
 // For the bind mode the nodeset must be non-empty.
 TEST_F(testNuma, checkModeBindIllegalArgSet) {
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_BIND;
+
     umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_BIND);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
     umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
                                          &os_memory_provider_params,
                                          &os_memory_provider);
-
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
     ASSERT_EQ(os_memory_provider, nullptr);
 }
@@ -877,53 +763,14 @@ TEST_F(testNuma, checkModeBindIllegalArgSet) {
 // Interleave mode enabled numa_list is not set.
 // For the interleave mode the nodeset must be non-empty.
 TEST_F(testNuma, checkModeInterleaveIllegalArgSet) {
+    umf_os_memory_provider_params_t os_memory_provider_params =
+        UMF_OS_MEMORY_PROVIDER_PARAMS_TEST;
+    os_memory_provider_params.numa_mode = UMF_NUMA_MODE_INTERLEAVE;
+
     umf_result_t umf_result;
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    umf_result = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
-    umf_result = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                                      UMF_NUMA_MODE_INTERLEAVE);
-    ASSERT_EQ(umf_result, UMF_RESULT_SUCCESS);
-
     umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
                                          &os_memory_provider_params,
                                          &os_memory_provider);
-
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
     ASSERT_EQ(umf_result, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-    ASSERT_EQ(os_memory_provider, nullptr);
-}
-
-// Interleave mode set with SIZE_MAX part size
-TEST_F(testNuma, maxPartSize) {
-    std::vector<unsigned> numa_nodes = get_available_numa_nodes();
-
-    umf_os_memory_provider_params_handle_t os_memory_provider_params = nullptr;
-
-    auto res = umfOsMemoryProviderParamsCreate(&os_memory_provider_params);
-    ASSERT_EQ(res, UMF_RESULT_SUCCESS);
-
-    res = umfOsMemoryProviderParamsSetNumaMode(os_memory_provider_params,
-                                               UMF_NUMA_MODE_INTERLEAVE);
-    ASSERT_EQ(res, UMF_RESULT_SUCCESS);
-
-    res = umfOsMemoryProviderParamsSetPartSize(os_memory_provider_params,
-                                               SIZE_MAX);
-    ASSERT_EQ(res, UMF_RESULT_SUCCESS);
-
-    res = umfOsMemoryProviderParamsSetNumaList(
-        os_memory_provider_params, numa_nodes.data(), numa_nodes.size());
-    ASSERT_EQ(res, UMF_RESULT_SUCCESS);
-
-    res = umfMemoryProviderCreate(umfOsMemoryProviderOps(),
-                                  &os_memory_provider_params,
-                                  &os_memory_provider);
-
-    umfOsMemoryProviderParamsDestroy(os_memory_provider_params);
-
-    ASSERT_EQ(res, UMF_RESULT_ERROR_INVALID_ARGUMENT);
     ASSERT_EQ(os_memory_provider, nullptr);
 }

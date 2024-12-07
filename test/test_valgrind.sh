@@ -84,14 +84,6 @@ for test in $(ls -1 umf_test-*); do
 	# skip tests incompatible with valgrind
 	FILTER=""
 	case $test in
-	umf_test-disjointPool)
-		if [ "$TOOL" = "helgrind" ]; then
-			# skip because of the assert in helgrind:
-			# Helgrind: hg_main.c:308 (lockN_acquire_reader): Assertion 'lk->kind == LK_rdwr' failed.
-			echo "- SKIPPED (helgrind only)"
-			continue;
-		fi
-		;;
 	umf_test-ipc_os_prov_*)
 		echo "- SKIPPED"
 		continue; # skip testing helper binaries used by the ipc_os_prov_* tests
@@ -124,9 +116,6 @@ for test in $(ls -1 umf_test-*); do
 		;;
 	umf_test-memspace_lowest_latency)
 		FILTER='--gtest_filter="-*allocLocalMt*"'
-		;;
-	umf_test-memoryPool)
-		FILTER='--gtest_filter="-*allocMaxSize*"'
 		;;
 	esac
 

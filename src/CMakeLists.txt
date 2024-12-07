@@ -16,15 +16,72 @@ set(UMF_CUDA_INCLUDE_DIR
 # TODO: Cleanup the compile definitions across all the CMake files
 set(UMF_COMMON_COMPILE_DEFINITIONS UMF_VERSION=${UMF_VERSION})
 
+# Fetch L0 loader only if needed i.e.: if building L0 provider is ON and L0
+# headers are not provided by the user (via setting UMF_LEVEL_ZERO_INCLUDE_DIR).
+if(UMF_BUILD_LEVEL_ZERO_PROVIDER AND (NOT UMF_LEVEL_ZERO_INCLUDE_DIR))
+    include(FetchContent)
+
+    set(LEVEL_ZERO_LOADER_REPO "https://github.com/oneapi-src/level-zero.git")
+    set(LEVEL_ZERO_LOADER_TAG v1.17.39)
+
+    message(
+        STATUS
+            "Fetching L0 loader (${LEVEL_ZERO_LOADER_TAG}) from ${LEVEL_ZERO_LOADER_REPO} ..."
+    )
+
+    FetchContent_Declare(
+        level-zero-loader
+        GIT_REPOSITORY ${LEVEL_ZERO_LOADER_REPO}
+        GIT_TAG ${LEVEL_ZERO_LOADER_TAG}
+        EXCLUDE_FROM_ALL)
+    FetchContent_MakeAvailable(level-zero-loader)
+
+    set(LEVEL_ZERO_INCLUDE_DIRS
+        ${level-zero-loader_SOURCE_DIR}/include
+        CACHE PATH "Path to Level Zero Headers")
+    message(STATUS "Level Zero include directory: ${LEVEL_ZERO_INCLUDE_DIRS}")
+elseif(UMF_BUILD_LEVEL_ZERO_PROVIDER)
+    # Only header is needed to build UMF
+    set(LEVEL_ZERO_INCLUDE_DIRS ${UMF_LEVEL_ZERO_INCLUDE_DIR})
+    message(STATUS "Level Zero include directory: ${LEVEL_ZERO_INCLUDE_DIRS}")
+endif()
+
+# Fetch CUDA only if needed i.e.: if building CUDA provider is ON and CUDA
+# headers are not provided by the user (via setting UMF_CUDA_INCLUDE_DIR).
+if(UMF_BUILD_CUDA_PROVIDER AND (NOT UMF_CUDA_INCLUDE_DIR))
+    include(FetchContent)
+
+    set(CUDA_REPO
+        "https://gitlab.com/nvidia/headers/cuda-individual/cudart.git")
+    set(CUDA_TAG cuda-12.5.1)
+
+    message(STATUS "Fetching CUDA ${CUDA_TAG} from ${CUDA_REPO} ...")
+
+    FetchContent_Declare(
+        cuda-headers
+        GIT_REPOSITORY ${CUDA_REPO}
+        GIT_TAG ${CUDA_TAG}
+        EXCLUDE_FROM_ALL)
+    FetchContent_MakeAvailable(cuda-headers)
+
+    set(CUDA_INCLUDE_DIRS
+        ${cuda-headers_SOURCE_DIR}
+        CACHE PATH "Path to CUDA headers")
+    message(STATUS "CUDA include directory: ${CUDA_INCLUDE_DIRS}")
+elseif(UMF_BUILD_CUDA_PROVIDER)
+    # Only header is needed to build UMF
+    set(CUDA_INCLUDE_DIRS ${UMF_CUDA_INCLUDE_DIR})
+    message(STATUS "CUDA include directory: ${CUDA_INCLUDE_DIRS}")
+endif()
+
+add_subdirectory(utils)
+
+set(UMF_LIBS $<BUILD_INTERFACE:umf_utils>)
+
 set(BA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/base_alloc/base_alloc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/base_alloc/base_alloc_linear.c
     ${CMAKE_CURRENT_SOURCE_DIR}/base_alloc/base_alloc_global.c)
-
-add_subdirectory(utils)
-add_subdirectory(coarse)
-
-set(UMF_LIBS $<BUILD_INTERFACE:umf_utils> $<BUILD_INTERFACE:coarse>)
 
 if(LINUX)
     set(BA_SOURCES ${BA_SOURCES}
@@ -47,7 +104,6 @@ set(UMF_SOURCES
     ${BA_SOURCES}
     libumf.c
     ipc.c
-    ipc_cache.c
     memory_pool.c
     memory_provider.c
     memory_provider_get_last_failed.c
@@ -69,18 +125,7 @@ set(UMF_SOURCES
     critnib/critnib.c
     ravl/ravl.c
     pool/pool_proxy.c
-    pool/pool_jemalloc.c
     pool/pool_scalable.c)
-
-if(UMF_POOL_JEMALLOC_ENABLED)
-    set(UMF_LIBS ${UMF_LIBS} ${JEMALLOC_LIBRARIES})
-    set(UMF_PRIVATE_LIBRARY_DIRS ${UMF_PRIVATE_LIBRARY_DIRS}
-                                 ${JEMALLOC_LIBRARY_DIRS})
-    set(UMF_PRIVATE_INCLUDE_DIRS ${UMF_PRIVATE_INCLUDE_DIRS}
-                                 ${JEMALLOC_INCLUDE_DIRS})
-    set(UMF_COMMON_COMPILE_DEFINITIONS ${UMF_COMMON_COMPILE_DEFINITIONS}
-                                       "UMF_POOL_JEMALLOC_ENABLED=1")
-endif()
 
 if(NOT UMF_DISABLE_HWLOC)
     set(UMF_SOURCES ${UMF_SOURCES} ${HWLOC_DEPENDENT_SOURCES}
@@ -128,10 +173,6 @@ elseif(MACOSX)
 endif()
 
 if(UMF_BUILD_SHARED_LIBRARY)
-    if(UMF_INSTALL_RPATH)
-        set(CMAKE_INSTALL_RPATH "${UMF_INSTALL_RPATH}")
-    endif()
-
     if(NOT UMF_DISABLE_HWLOC)
         set(HWLOC_LIB ${UMF_HWLOC_NAME})
     endif()
@@ -157,19 +198,13 @@ else()
         LIBS ${UMF_LIBS})
 endif()
 
-target_include_directories(umf PRIVATE ${UMF_PRIVATE_INCLUDE_DIRS})
-target_link_directories(umf PRIVATE ${UMF_PRIVATE_LIBRARY_DIRS})
-target_compile_definitions(umf PRIVATE ${UMF_COMMON_COMPILE_DEFINITIONS})
-
-add_dependencies(umf coarse)
-
 if(UMF_LINK_HWLOC_STATICALLY)
     add_dependencies(umf ${UMF_HWLOC_NAME})
 endif()
 
-if(NOT WINDOWS AND UMF_POOL_JEMALLOC_ENABLED)
-    add_dependencies(umf jemalloc)
-endif()
+target_link_directories(umf PRIVATE ${UMF_PRIVATE_LIBRARY_DIRS})
+
+target_compile_definitions(umf PRIVATE ${UMF_COMMON_COMPILE_DEFINITIONS})
 
 if(UMF_BUILD_LEVEL_ZERO_PROVIDER)
     if(LINUX)
@@ -212,13 +247,14 @@ target_include_directories(
            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/provider>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/memspaces>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/memtargets>
-           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/uthash>
            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 install(TARGETS umf EXPORT ${PROJECT_NAME}-targets)
 
 add_subdirectory(pool)
 
-if(UMF_PROXY_LIB_ENABLED)
+if(UMF_PROXY_LIB_ENABLED
+   AND NOT UMF_LINK_HWLOC_STATICALLY
+   AND NOT UMF_DISABLE_HWLOC)
     add_subdirectory(proxy_lib)
 endif()

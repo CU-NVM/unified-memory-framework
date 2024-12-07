@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "examples_utils.h"
+#include "utils_examples.h"
 
 // Function to create a memory provider which allocates memory from the specified NUMA node
 // by using umfMemspaceCreateFromNumaArray
@@ -146,7 +146,8 @@ int use_memory_provider(umf_memory_provider_handle_t hProvider) {
 int main(void) {
     umf_memory_provider_handle_t hProvider = NULL;
     umf_result_t ret;
-
+    printf("Running memspace_numa example\n");
+    fflush(stdout);
     // Check if NUMA is available
     if (numa_available() < 0) {
         fprintf(stderr, "NUMA is not available on this system.\n");

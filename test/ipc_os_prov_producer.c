@@ -19,44 +19,18 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    int ret = 0;
     int port = atoi(argv[1]);
 
-    umf_os_memory_provider_params_handle_t os_params = NULL;
+    umf_os_memory_provider_params_t os_params;
 
-    umf_result_t umf_result = umfOsMemoryProviderParamsCreate(&os_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(
-            stderr,
-            "[producer] ERROR: creating OS memory provider params failed\n");
-        return -1;
-    }
-
-    umf_result =
-        umfOsMemoryProviderParamsSetVisibility(os_params, UMF_MEM_MAP_SHARED);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "[producer] ERROR: setting visibility mode failed\n");
-        ret = -1;
-        goto destroy_provider_params;
-    }
-
+    os_params = umfOsMemoryProviderParamsDefault();
+    os_params.visibility = UMF_MEM_MAP_SHARED;
     if (argc >= 3) {
-        umf_result = umfOsMemoryProviderParamsSetShmName(os_params, argv[2]);
-        if (umf_result != UMF_RESULT_SUCCESS) {
-            fprintf(stderr,
-                    "[producer] ERROR: setting shared memory name failed\n");
-            ret = -1;
-            goto destroy_provider_params;
-        }
+        os_params.shm_name = argv[2];
     }
 
     void *pool_params = NULL;
 
-    ret = run_producer(port, umfScalablePoolOps(), pool_params,
-                       umfOsMemoryProviderOps(), os_params, memcopy, NULL);
-
-destroy_provider_params:
-    umfOsMemoryProviderParamsDestroy(os_params);
-
-    return ret;
+    return run_producer(port, umfScalablePoolOps(), pool_params,
+                        umfOsMemoryProviderOps(), &os_params, memcopy, NULL);
 }

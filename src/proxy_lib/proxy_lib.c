@@ -27,12 +27,6 @@
  * - _aligned_offset_recalloc()
  */
 
-#ifndef _WIN32
-#define _GNU_SOURCE // for RTLD_NEXT
-#include <dlfcn.h>
-#undef _GNU_SOURCE
-#endif /* _WIN32 */
-
 #if (defined PROXY_LIB_USES_JEMALLOC_POOL)
 #include <umf/pools/pool_jemalloc.h>
 #define umfPoolManagerOps umfJemallocPoolOps
@@ -54,7 +48,6 @@
 #include "base_alloc_linear.h"
 #include "proxy_lib.h"
 #include "utils_common.h"
-#include "utils_load_library.h"
 #include "utils_log.h"
 
 #ifdef _WIN32 /* Windows ***************************************/
@@ -101,24 +94,6 @@ void utils_init_once(UTIL_ONCE_FLAG *flag, void (*onceCb)(void));
  * of a UMF pool to allocate memory needed by an application. It should be freed
  * by an application.
  */
-#ifndef _WIN32
-typedef void *(*system_aligned_alloc_t)(size_t alignment, size_t size);
-typedef void *(*system_calloc_t)(size_t nmemb, size_t size);
-typedef void (*system_free_t)(void *ptr);
-typedef void *(*system_malloc_t)(size_t size);
-typedef size_t (*system_malloc_usable_size_t)(void *ptr);
-typedef void *(*system_realloc_t)(void *ptr, size_t size);
-
-// pointers to the default system allocator's API
-static system_aligned_alloc_t System_aligned_alloc;
-static system_calloc_t System_calloc;
-static system_free_t System_free;
-static system_malloc_t System_malloc;
-static system_malloc_usable_size_t System_malloc_usable_size;
-static system_realloc_t System_realloc;
-
-static size_t Size_threshold_value = 0;
-#endif /* _WIN32 */
 
 static UTIL_ONCE_FLAG Base_alloc_leak_initialized = UTIL_ONCE_FLAG_INIT;
 static umf_ba_linear_pool_t *Base_alloc_leak = NULL;
@@ -132,121 +107,53 @@ static __TLS int was_called_from_umfPool = 0;
 /*** The constructor and destructor of the proxy library *********************/
 /*****************************************************************************/
 
-#ifndef _WIN32
-static size_t get_size_threshold(void) {
-    char *str_threshold = utils_env_var_get_str("UMF_PROXY", "size.threshold=");
-    LOG_DEBUG("UMF_PROXY[size.threshold] = %s", str_threshold);
-    long threshold = utils_get_size_threshold(str_threshold);
-    if (threshold < 0) {
-        LOG_ERR("incorrect size threshold: %s", str_threshold);
-        exit(-1);
-    }
-
-    return (size_t)threshold;
-}
-
-static int get_system_allocator_symbols(void) {
-    *((void **)(&System_aligned_alloc)) =
-        utils_get_symbol_addr(RTLD_NEXT, "aligned_alloc", NULL);
-    *((void **)(&System_calloc)) =
-        utils_get_symbol_addr(RTLD_NEXT, "calloc", NULL);
-    *((void **)(&System_free)) = utils_get_symbol_addr(RTLD_NEXT, "free", NULL);
-    *((void **)(&System_malloc)) =
-        utils_get_symbol_addr(RTLD_NEXT, "malloc", NULL);
-    *((void **)(&System_malloc_usable_size)) =
-        utils_get_symbol_addr(RTLD_NEXT, "malloc_usable_size", NULL);
-    *((void **)(&System_realloc)) =
-        utils_get_symbol_addr(RTLD_NEXT, "realloc", NULL);
-
-    if (System_aligned_alloc && System_calloc && System_free && System_malloc &&
-        System_malloc_usable_size && System_realloc) {
-        return 0;
-    }
-
-    return -1;
-}
-#endif /* _WIN32 */
-
 void proxy_lib_create_common(void) {
     utils_log_init();
-    umf_os_memory_provider_params_handle_t os_params = NULL;
+    umf_os_memory_provider_params_t os_params =
+        umfOsMemoryProviderParamsDefault();
     umf_result_t umf_result;
 
-    umf_result = umfOsMemoryProviderParamsCreate(&os_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        LOG_ERR("creating OS memory provider params failed");
-        exit(-1);
-    }
-
 #ifndef _WIN32
-    size_t _threshold = get_size_threshold();
-    if (_threshold > 0) {
-        if (get_system_allocator_symbols()) {
-            LOG_ERR("initialization of the system allocator failed!");
-            exit(-1);
-        }
-
-        Size_threshold_value = _threshold;
-        LOG_INFO("system allocator initialized, size threshold value = %zu",
-                 Size_threshold_value);
-    }
+    char shm_name[NAME_MAX];
 
     if (utils_env_var_has_str("UMF_PROXY", "page.disposition=shared-fd")) {
-        LOG_INFO("proxy_lib: using the MAP_SHARED visibility mode with the "
-                 "file descriptor duplication");
-        umf_result = umfOsMemoryProviderParamsSetVisibility(os_params,
-                                                            UMF_MEM_MAP_SHARED);
-        if (umf_result != UMF_RESULT_SUCCESS) {
-            LOG_ERR("setting visibility mode failed");
-            exit(-1);
-        }
-        umf_result = umfOsMemoryProviderParamsSetShmName(os_params, NULL);
-        if (umf_result != UMF_RESULT_SUCCESS) {
-            LOG_ERR("setting shared memory name failed");
-            exit(-1);
-        }
+        LOG_DEBUG("proxy_lib: using the MAP_SHARED visibility mode with the "
+                  "file descriptor duplication");
+        os_params.visibility = UMF_MEM_MAP_SHARED;
+        os_params.shm_name = NULL;
+
     } else if (utils_env_var_has_str("UMF_PROXY",
                                      "page.disposition=shared-shm")) {
-        umf_result = umfOsMemoryProviderParamsSetVisibility(os_params,
-                                                            UMF_MEM_MAP_SHARED);
-        if (umf_result != UMF_RESULT_SUCCESS) {
-            LOG_ERR("setting visibility mode failed");
-            exit(-1);
-        }
+        LOG_DEBUG("proxy_lib: using the MAP_SHARED visibility mode with the "
+                  "named shared memory");
+        os_params.visibility = UMF_MEM_MAP_SHARED;
 
-        char shm_name[NAME_MAX];
         memset(shm_name, 0, NAME_MAX);
         sprintf(shm_name, "umf_proxy_lib_shm_pid_%i", utils_getpid());
-        umf_result = umfOsMemoryProviderParamsSetShmName(os_params, shm_name);
-        if (umf_result != UMF_RESULT_SUCCESS) {
-            LOG_ERR("setting shared memory name failed");
-            exit(-1);
-        }
+        os_params.shm_name = shm_name;
 
-        LOG_INFO("proxy_lib: using the MAP_SHARED visibility mode with the "
-                 "named shared memory: %s",
-                 shm_name);
+        LOG_DEBUG("proxy_lib: using the MAP_SHARED visibility mode with the "
+                  "named shared memory: %s",
+                  os_params.shm_name);
     }
-#endif /* _WIN32 */
+#endif
 
-    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(), os_params,
+    umf_result = umfMemoryProviderCreate(umfOsMemoryProviderOps(), &os_params,
                                          &OS_memory_provider);
-    umfOsMemoryProviderParamsDestroy(os_params);
     if (umf_result != UMF_RESULT_SUCCESS) {
         LOG_ERR("creating OS memory provider failed");
         exit(-1);
     }
 
-    umf_result = umfPoolCreate(umfPoolManagerOps(), OS_memory_provider, NULL, 0,
-                               &Proxy_pool);
+    umf_result =
+        umfPoolCreate(umfPoolManagerOps(), OS_memory_provider, NULL,
+                      UMF_POOL_CREATE_FLAG_DISABLE_TRACKING, &Proxy_pool);
     if (umf_result != UMF_RESULT_SUCCESS) {
         LOG_ERR("creating UMF pool manager failed");
         exit(-1);
     }
-
     // The UMF pool has just been created (Proxy_pool != NULL). Stop using
     // the linear allocator and start using the UMF pool allocator from now on.
-    LOG_DEBUG("proxy library initialized");
 }
 
 void proxy_lib_destroy_common(void) {
@@ -254,7 +161,7 @@ void proxy_lib_destroy_common(void) {
         // We cannot destroy 'Base_alloc_leak' nor 'Proxy_pool' nor 'OS_memory_provider',
         // because it could lead to use-after-free in the program's unloader
         // (for example _dl_fini() on Linux).
-        goto fini_proxy_lib_destroy_common;
+        return;
     }
 
     umf_memory_pool_handle_t pool = Proxy_pool;
@@ -264,10 +171,6 @@ void proxy_lib_destroy_common(void) {
     umf_memory_provider_handle_t provider = OS_memory_provider;
     OS_memory_provider = NULL;
     umfMemoryProviderDestroy(provider);
-    LOG_DEBUG("proxy library destroyed");
-
-fini_proxy_lib_destroy_common:
-    LOG_DEBUG("proxy library finalized");
 }
 
 /*****************************************************************************/
@@ -309,26 +212,26 @@ static void ba_leak_init_once(void) {
     utils_init_once(&Base_alloc_leak_initialized, ba_leak_create);
 }
 
-static inline void *ba_leak_aligned_alloc(size_t alignment, size_t size) {
-    ba_leak_init_once();
-    void *ptr = umf_ba_linear_alloc(Base_alloc_leak, size + alignment);
-    return (void *)ALIGN_UP_SAFE((uintptr_t)ptr, alignment);
-}
-
 static inline void *ba_leak_malloc(size_t size) {
-    return ba_leak_aligned_alloc(0, size);
+    ba_leak_init_once();
+    return umf_ba_linear_alloc(Base_alloc_leak, size);
 }
 
 static inline void *ba_leak_calloc(size_t nmemb, size_t size) {
     ba_leak_init_once();
     // umf_ba_linear_alloc() returns zeroed memory
-    // so ba_leak_aligned_alloc() does too
-    return ba_leak_aligned_alloc(0, nmemb * size);
+    return umf_ba_linear_alloc(Base_alloc_leak, nmemb * size);
 }
 
 static inline void *ba_leak_realloc(void *ptr, size_t size, size_t max_size) {
     ba_leak_init_once();
     return ba_generic_realloc(Base_alloc_leak, ptr, size, max_size);
+}
+
+static inline void *ba_leak_aligned_alloc(size_t alignment, size_t size) {
+    ba_leak_init_once();
+    void *ptr = umf_ba_linear_alloc(Base_alloc_leak, size + alignment);
+    return (void *)ALIGN_UP((uintptr_t)ptr, alignment);
 }
 
 static inline int ba_leak_free(void *ptr) {
@@ -346,12 +249,6 @@ static inline size_t ba_leak_pool_contains_pointer(void *ptr) {
 /*****************************************************************************/
 
 void *malloc(size_t size) {
-#ifndef _WIN32
-    if (size < Size_threshold_value) {
-        return System_malloc(size);
-    }
-#endif /* _WIN32 */
-
     if (!was_called_from_umfPool && Proxy_pool) {
         was_called_from_umfPool = 1;
         void *ptr = umfPoolMalloc(Proxy_pool, size);
@@ -363,12 +260,6 @@ void *malloc(size_t size) {
 }
 
 void *calloc(size_t nmemb, size_t size) {
-#ifndef _WIN32
-    if ((nmemb * size) < Size_threshold_value) {
-        return System_calloc(nmemb, size);
-    }
-#endif /* _WIN32 */
-
     if (!was_called_from_umfPool && Proxy_pool) {
         was_called_from_umfPool = 1;
         void *ptr = umfPoolCalloc(Proxy_pool, nmemb, size);
@@ -388,22 +279,15 @@ void free(void *ptr) {
         return;
     }
 
-    if (Proxy_pool && (umfPoolByPtr(ptr) == Proxy_pool)) {
+    if (Proxy_pool) {
         if (umfPoolFree(Proxy_pool, ptr) != UMF_RESULT_SUCCESS) {
             LOG_ERR("umfPoolFree() failed");
+            assert(0);
         }
         return;
     }
 
-#ifndef _WIN32
-    if (Size_threshold_value) {
-        System_free(ptr);
-        return;
-    }
-#endif /* _WIN32 */
-
-    LOG_ERR("free() failed: %p", ptr);
-
+    assert(0);
     return;
 }
 
@@ -422,31 +306,18 @@ void *realloc(void *ptr, size_t size) {
         return ba_leak_realloc(ptr, size, leak_pool_contains_pointer);
     }
 
-    if (Proxy_pool && (umfPoolByPtr(ptr) == Proxy_pool)) {
+    if (Proxy_pool) {
         was_called_from_umfPool = 1;
         void *new_ptr = umfPoolRealloc(Proxy_pool, ptr, size);
         was_called_from_umfPool = 0;
         return new_ptr;
     }
 
-#ifndef _WIN32
-    if (Size_threshold_value) {
-        return System_realloc(ptr, size);
-    }
-#endif /* _WIN32 */
-
-    LOG_ERR("realloc() failed: %p", ptr);
-
+    assert(0);
     return NULL;
 }
 
 void *aligned_alloc(size_t alignment, size_t size) {
-#ifndef _WIN32
-    if (size < Size_threshold_value) {
-        return System_aligned_alloc(alignment, size);
-    }
-#endif /* _WIN32 */
-
     if (!was_called_from_umfPool && Proxy_pool) {
         was_called_from_umfPool = 1;
         void *ptr = umfPoolAlignedMalloc(Proxy_pool, size, alignment);
@@ -462,29 +333,18 @@ size_t _msize(void *ptr) {
 #else
 size_t malloc_usable_size(void *ptr) {
 #endif
-    // a check to verify if we are running the proxy library
+
+    // a check to verify we are running the proxy library
     if (ptr == (void *)0x01) {
         return 0xDEADBEEF;
     }
 
-    if (ba_leak_pool_contains_pointer(ptr)) {
-        return 0; // unsupported in case of the ba_leak allocator
-    }
-
-    if (Proxy_pool && (umfPoolByPtr(ptr) == Proxy_pool)) {
+    if (!was_called_from_umfPool && Proxy_pool) {
         was_called_from_umfPool = 1;
         size_t size = umfPoolMallocUsableSize(Proxy_pool, ptr);
         was_called_from_umfPool = 0;
         return size;
     }
-
-#ifndef _WIN32
-    if (Size_threshold_value) {
-        return System_malloc_usable_size(ptr);
-    }
-#endif /* _WIN32 */
-
-    LOG_ERR("malloc_usable_size() failed: %p", ptr);
 
     return 0; // unsupported in this case
 }

@@ -113,6 +113,10 @@ static void file_deinit(void *provider) {
 // Function to allocate memory from the file provider
 static umf_result_t file_alloc(void *provider, size_t size, size_t alignment,
                                void **ptr) {
+    if (provider == NULL || ptr == NULL) {
+        fprintf(stderr, "Provider or ptr cannot be null\n");
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
     file_provider_t *file_provider = (file_provider_t *)provider;
     size_t page_size = file_provider->page_size;
 
@@ -161,8 +165,8 @@ static umf_result_t file_alloc(void *provider, size_t size, size_t alignment,
 
 // Function to free allocated memory from the file provider
 static umf_result_t file_free(void *provider, void *ptr, size_t size) {
-    if (ptr == NULL) {
-        fprintf(stderr, "ptr cannot be null\n");
+    if (provider == NULL || ptr == NULL) {
+        fprintf(stderr, "Provider or ptr cannot be null\n");
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
     file_provider_t *file_provider = (file_provider_t *)provider;
@@ -217,6 +221,11 @@ static void file_get_last_native_error(void *provider, const char **ppMessage,
 static umf_result_t file_get_recommended_page_size(void *provider, size_t size,
                                                    size_t *pageSize) {
     (void)size; // Unused parameter
+    if (provider == NULL || pageSize == NULL) {
+        fprintf(stderr, "Provider or pageSize cannot be null\n");
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     file_provider_t *file_provider = (file_provider_t *)provider;
     *pageSize = file_provider->page_size;
     return UMF_RESULT_SUCCESS;
@@ -226,6 +235,11 @@ static umf_result_t file_get_recommended_page_size(void *provider, size_t size,
 static umf_result_t file_get_min_page_size(void *provider, void *ptr,
                                            size_t *pageSize) {
     (void)ptr; // Unused parameter
+    if (provider == NULL || pageSize == NULL) {
+        fprintf(stderr, "Provider or pageSize cannot be null\n");
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     file_provider_t *file_provider = (file_provider_t *)provider;
     *pageSize = file_provider->page_size;
     return UMF_RESULT_SUCCESS;
@@ -237,11 +251,11 @@ static umf_memory_provider_ops_t file_ops = {
     .initialize = file_init,
     .finalize = file_deinit,
     .alloc = file_alloc,
-    .free = file_free,
     .get_name = file_get_name,
     .get_last_native_error = file_get_last_native_error,
     .get_recommended_page_size = file_get_recommended_page_size,
     .get_min_page_size = file_get_min_page_size,
+    .ext.free = file_free,
 };
 
 // Main function

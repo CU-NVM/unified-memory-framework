@@ -1,7 +1,0 @@
-{
-   False-positive invalid write of size 8
-   Memcheck:Addr8
-   ...
-   fun:je_*
-   ...
-}

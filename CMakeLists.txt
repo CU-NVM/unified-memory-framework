@@ -5,7 +5,7 @@
 cmake_minimum_required(VERSION 3.14.0 FATAL_ERROR)
 # needed when UMF is used as an external project
 set(UMF_CMAKE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-
+set(UMF_BUILD_LIBUMF_POOL_JEMALLOC ON)
 list(APPEND CMAKE_MODULE_PATH "${UMF_CMAKE_SOURCE_DIR}/cmake")
 # Use full path of the helpers module (to omit potential conflicts with others)
 include(${UMF_CMAKE_SOURCE_DIR}/cmake/helpers.cmake)
@@ -63,12 +63,6 @@ option(UMF_FORMAT_CODE_STYLE
 set(UMF_HWLOC_NAME
     "hwloc"
     CACHE STRING "Custom name for hwloc library w/o extension")
-set(UMF_INSTALL_RPATH
-    ""
-    CACHE
-        STRING
-        "Set the runtime search path to the directory with dependencies (e.g. hwloc)"
-)
 
 # Only a part of skips is treated as a failure now. TODO: extend to all tests
 option(UMF_TESTS_FAIL_ON_SKIP "Treat skips in tests as fail" OFF)
@@ -109,95 +103,6 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(OS_NAME "macosx")
 else()
     message(FATAL_ERROR "Unknown OS type")
-endif()
-
-if(NOT UMF_BUILD_LIBUMF_POOL_JEMALLOC)
-    set(UMF_POOL_JEMALLOC_ENABLED FALSE)
-    set(JEMALLOC_FOUND FALSE)
-    set(JEMALLOC_LIBRARIES FALSE)
-elseif(WINDOWS)
-    pkg_check_modules(JEMALLOC jemalloc)
-    if(NOT JEMALLOC_FOUND)
-        find_package(JEMALLOC REQUIRED jemalloc)
-    endif()
-else()
-    if(NOT DEFINED UMF_JEMALLOC_REPO)
-        set(UMF_JEMALLOC_REPO "https://github.com/jemalloc/jemalloc.git")
-    endif()
-
-    if(NOT DEFINED UMF_JEMALLOC_TAG)
-        set(UMF_JEMALLOC_TAG 5.3.0)
-    endif()
-
-    include(FetchContent)
-    message(
-        STATUS
-            "Will fetch jemalloc from ${UMF_JEMALLOC_REPO} (tag: ${UMF_JEMALLOC_TAG})"
-    )
-
-    FetchContent_Declare(
-        jemalloc_targ
-        GIT_REPOSITORY ${UMF_JEMALLOC_REPO}
-        GIT_TAG ${UMF_JEMALLOC_TAG})
-    FetchContent_MakeAvailable(jemalloc_targ)
-
-    add_custom_command(
-        COMMAND ./autogen.sh
-        WORKING_DIRECTORY ${jemalloc_targ_SOURCE_DIR}
-        OUTPUT ${jemalloc_targ_SOURCE_DIR}/configure)
-    add_custom_command(
-        # Custom jemalloc build. Non-default options used:
-        # --with-jemalloc-prefix=je_ - add je_ prefix to all public APIs
-        # --disable-cxx - Disable C++ integration. This will cause new and
-        # delete operators implementations to be omitted.
-        # --disable-initial-exec-tls - Disable the initial-exec TLS model for
-        # jemalloc's internal thread-local storage (on those platforms that
-        # support explicit settings). This can allow jemalloc to be dynamically
-        # loaded after program startup (e.g. using dlopen).
-        COMMAND
-            ./configure --prefix=${jemalloc_targ_BINARY_DIR}
-            --with-jemalloc-prefix=je_ --disable-cxx --disable-initial-exec-tls
-            CFLAGS=-fPIC
-        WORKING_DIRECTORY ${jemalloc_targ_SOURCE_DIR}
-        OUTPUT ${jemalloc_targ_SOURCE_DIR}/Makefile
-        DEPENDS ${jemalloc_targ_SOURCE_DIR}/configure)
-    add_custom_command(
-        COMMAND make
-        WORKING_DIRECTORY ${jemalloc_targ_SOURCE_DIR}
-        OUTPUT ${jemalloc_targ_SOURCE_DIR}/lib/libjemalloc.la
-        DEPENDS ${jemalloc_targ_SOURCE_DIR}/Makefile)
-    add_custom_command(
-        COMMAND make install
-        WORKING_DIRECTORY ${jemalloc_targ_SOURCE_DIR}
-        OUTPUT ${jemalloc_targ_BINARY_DIR}/lib/libjemalloc.a
-        DEPENDS ${jemalloc_targ_SOURCE_DIR}/lib/libjemalloc.la)
-
-    add_custom_target(jemalloc_prod
-                      DEPENDS ${jemalloc_targ_BINARY_DIR}/lib/libjemalloc.a)
-    add_library(jemalloc INTERFACE)
-    target_link_libraries(
-        jemalloc INTERFACE ${jemalloc_targ_BINARY_DIR}/lib/libjemalloc.a)
-    add_dependencies(jemalloc jemalloc_prod)
-
-    set(JEMALLOC_LIBRARY_DIRS ${jemalloc_targ_BINARY_DIR}/lib)
-    set(JEMALLOC_INCLUDE_DIRS ${jemalloc_targ_BINARY_DIR}/include)
-    set(JEMALLOC_LIBRARIES ${jemalloc_targ_BINARY_DIR}/lib/libjemalloc.a)
-endif()
-
-if(JEMALLOC_FOUND OR JEMALLOC_LIBRARIES)
-    set(UMF_POOL_JEMALLOC_ENABLED TRUE)
-    # add PATH to DLL on Windows
-    set(DLL_PATH_LIST
-        "${DLL_PATH_LIST};PATH=path_list_append:${JEMALLOC_DLL_DIRS}")
-    message(STATUS "    JEMALLOC_LIBRARIES = ${JEMALLOC_LIBRARIES}")
-    message(STATUS "    JEMALLOC_INCLUDE_DIRS = ${JEMALLOC_INCLUDE_DIRS}")
-    message(STATUS "    JEMALLOC_LIBRARY_DIRS = ${JEMALLOC_LIBRARY_DIRS}")
-else()
-    set(UMF_POOL_JEMALLOC_ENABLED FALSE)
-    message(
-        STATUS
-            "Disabling the Jemalloc Pool and tests and benchmarks that use it because jemalloc was not built/found."
-    )
 endif()
 
 if(UMF_DISABLE_HWLOC)
@@ -264,9 +169,8 @@ else()
             COMMAND
                 ./configure --prefix=${hwloc_targ_BINARY_DIR}
                 --enable-static=yes --enable-shared=no --disable-libxml2
-                --disable-pci --disable-levelzero --disable-opencl
-                --disable-cuda --disable-nvml --disable-libudev CFLAGS=-fPIC
-                CXXFLAGS=-fPIC
+                --disable-pciaccess --disable-levelzero --disable-opencl
+                --disable-cuda --disable-nvml CFLAGS=-fPIC CXXFLAGS=-fPIC
             WORKING_DIRECTORY ${hwloc_targ_SOURCE_DIR}
             OUTPUT ${hwloc_targ_SOURCE_DIR}/Makefile
             DEPENDS ${hwloc_targ_SOURCE_DIR}/configure)
@@ -314,64 +218,6 @@ if(hwloc_targ_SOURCE_DIR)
     endif()
 endif()
 
-# Fetch L0 loader only if needed i.e.: if building L0 provider is ON and L0
-# headers are not provided by the user (via setting UMF_LEVEL_ZERO_INCLUDE_DIR).
-if(UMF_BUILD_LEVEL_ZERO_PROVIDER AND (NOT UMF_LEVEL_ZERO_INCLUDE_DIR))
-    include(FetchContent)
-
-    set(LEVEL_ZERO_LOADER_REPO "https://github.com/oneapi-src/level-zero.git")
-    set(LEVEL_ZERO_LOADER_TAG v1.19.2)
-
-    message(
-        STATUS
-            "Fetching L0 loader (${LEVEL_ZERO_LOADER_TAG}) from ${LEVEL_ZERO_LOADER_REPO} ..."
-    )
-
-    FetchContent_Declare(
-        level-zero-loader
-        GIT_REPOSITORY ${LEVEL_ZERO_LOADER_REPO}
-        GIT_TAG ${LEVEL_ZERO_LOADER_TAG}
-        EXCLUDE_FROM_ALL)
-    FetchContent_MakeAvailable(level-zero-loader)
-
-    set(LEVEL_ZERO_INCLUDE_DIRS
-        ${level-zero-loader_SOURCE_DIR}/include
-        CACHE PATH "Path to Level Zero Headers")
-    message(STATUS "Level Zero include directory: ${LEVEL_ZERO_INCLUDE_DIRS}")
-elseif(UMF_BUILD_LEVEL_ZERO_PROVIDER)
-    # Only header is needed to build UMF
-    set(LEVEL_ZERO_INCLUDE_DIRS ${UMF_LEVEL_ZERO_INCLUDE_DIR})
-    message(STATUS "Level Zero include directory: ${LEVEL_ZERO_INCLUDE_DIRS}")
-endif()
-
-# Fetch CUDA only if needed i.e.: if building CUDA provider is ON and CUDA
-# headers are not provided by the user (via setting UMF_CUDA_INCLUDE_DIR).
-if(UMF_BUILD_CUDA_PROVIDER AND (NOT UMF_CUDA_INCLUDE_DIR))
-    include(FetchContent)
-
-    set(CUDA_REPO
-        "https://gitlab.com/nvidia/headers/cuda-individual/cudart.git")
-    set(CUDA_TAG cuda-12.5.1)
-
-    message(STATUS "Fetching CUDA ${CUDA_TAG} from ${CUDA_REPO} ...")
-
-    FetchContent_Declare(
-        cuda-headers
-        GIT_REPOSITORY ${CUDA_REPO}
-        GIT_TAG ${CUDA_TAG}
-        EXCLUDE_FROM_ALL)
-    FetchContent_MakeAvailable(cuda-headers)
-
-    set(CUDA_INCLUDE_DIRS
-        ${cuda-headers_SOURCE_DIR}
-        CACHE PATH "Path to CUDA headers")
-    message(STATUS "CUDA include directory: ${CUDA_INCLUDE_DIRS}")
-elseif(UMF_BUILD_CUDA_PROVIDER)
-    # Only header is needed to build UMF
-    set(CUDA_INCLUDE_DIRS ${UMF_CUDA_INCLUDE_DIR})
-    message(STATUS "CUDA include directory: ${CUDA_INCLUDE_DIRS}")
-endif()
-
 # This build type check is not possible on Windows when CMAKE_BUILD_TYPE is not
 # set, because in this case the build type is determined after a CMake
 # configuration is done (at the build time)
@@ -409,7 +255,7 @@ endif()
 # compiler is required. Moreover, if these options are not set, CMake will set
 # up a strict C build, without C++ support.
 set(OPTIONS_REQUIRING_CXX "UMF_BUILD_TESTS" "UMF_BUILD_LIBUMF_POOL_DISJOINT"
-                          "UMF_BUILD_BENCHMARKS_MT" "UMF_BUILD_BENCHMARKS")
+                          "UMF_BUILD_BENCHMARKS_MT")
 foreach(option_name ${OPTIONS_REQUIRING_CXX})
     if(${option_name})
         enable_language(CXX)
@@ -422,9 +268,15 @@ endforeach()
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_UMF_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-if(CMAKE_GENERATOR MATCHES "Visual Studio" OR CMAKE_GENERATOR MATCHES
-                                              "Ninja Multi-Config")
+if(MSVC)
     set(CMAKE_UMF_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>)
+endif()
+
+# Define a path for custom commands to work around MSVC
+set(CUSTOM_COMMAND_BINARY_DIR ${CMAKE_UMF_OUTPUT_DIRECTORY})
+if(MSVC)
+    # MSVC implicitly adds $<CONFIG> to the output path
+    set(CUSTOM_COMMAND_BINARY_DIR ${CUSTOM_COMMAND_BINARY_DIR}/$<CONFIG>)
 endif()
 
 # Sanitizer flags
@@ -491,6 +343,19 @@ else()
     set(UMF_POOL_SCALABLE_ENABLED FALSE)
 endif()
 
+if(UMF_BUILD_LIBUMF_POOL_JEMALLOC)
+    pkg_check_modules(JEMALLOC jemalloc)
+    if(NOT JEMALLOC_FOUND)
+        find_package(JEMALLOC REQUIRED jemalloc)
+    endif()
+    if(JEMALLOC_FOUND OR JEMALLOC_LIBRARIES)
+        set(UMF_POOL_JEMALLOC_ENABLED TRUE)
+        # add PATH to DLL on Windows
+        set(DLL_PATH_LIST
+            "${DLL_PATH_LIST};PATH=path_list_append:${JEMALLOC_DLL_DIRS}")
+    endif()
+endif()
+
 if(WINDOWS)
     # TODO: enable the proxy library in the Debug build on Windows
     #
@@ -509,17 +374,8 @@ if(WINDOWS)
         )
     endif()
 endif()
-
 # set UMF_PROXY_LIB_ENABLED
-if(UMF_DISABLE_HWLOC)
-    message(STATUS "Disabling the proxy library, because HWLOC is disabled")
-elseif(NOT UMF_BUILD_SHARED_LIBRARY)
-    # TODO enable this scenario
-    message(
-        STATUS
-            "Disabling the proxy library, because UMF is built as static library"
-    )
-elseif(UMF_PROXY_LIB_BASED_ON_POOL STREQUAL SCALABLE)
+if(UMF_PROXY_LIB_BASED_ON_POOL STREQUAL SCALABLE)
     if(UMF_POOL_SCALABLE_ENABLED)
         set(UMF_PROXY_LIB_ENABLED ON)
         set(PROXY_LIB_USES_SCALABLE_POOL ON)
@@ -531,14 +387,14 @@ elseif(UMF_PROXY_LIB_BASED_ON_POOL STREQUAL SCALABLE)
         )
     endif()
 elseif(UMF_PROXY_LIB_BASED_ON_POOL STREQUAL JEMALLOC)
-    if(UMF_POOL_JEMALLOC_ENABLED)
+    if(UMF_BUILD_LIBUMF_POOL_JEMALLOC)
         set(UMF_PROXY_LIB_ENABLED ON)
         set(PROXY_LIB_USES_JEMALLOC_POOL ON)
-        set(PROXY_LIBS umf)
+        set(PROXY_LIBS jemalloc_pool umf)
     else()
         message(
             STATUS
-                "Disabling the proxy library, because UMF_PROXY_LIB_BASED_ON_POOL==JEMALLOC but the jemalloc pool is disabled"
+                "Disabling the proxy library, because UMF_PROXY_LIB_BASED_ON_POOL==JEMALLOC but UMF_BUILD_LIBUMF_POOL_JEMALLOC is OFF"
         )
     endif()
 else()

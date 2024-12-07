@@ -233,16 +233,19 @@ function(add_umf_target_compile_options name)
                     -Wall
                     -Wextra
                     -Wpedantic
+                    -Wempty-body
+                    -Wunused-parameter
+                    -Wformat
                     -Wformat-security
                     -Wcast-qual
+                    -Wunused-result
                     $<$<CXX_COMPILER_ID:GNU>:-fdiagnostics-color=auto>)
         if(CMAKE_BUILD_TYPE STREQUAL "Release")
             target_compile_definitions(${name} PRIVATE -D_FORTIFY_SOURCE=2)
         endif()
         if(UMF_DEVELOPER_MODE)
-            target_compile_options(
-                ${name} PRIVATE -fno-omit-frame-pointer
-                                -fstack-protector-strong -Werror)
+            target_compile_options(${name} PRIVATE -fno-omit-frame-pointer
+                                                   -fstack-protector-strong)
         endif()
         if(UMF_USE_COVERAGE)
             if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -276,9 +279,6 @@ function(add_umf_target_compile_options name)
                     # disable 4200 warning: nonstandard extension used:
                     # zero-sized array in struct/union
                     /wd4200)
-        if(UMF_DEVELOPER_MODE)
-            target_compile_options(${name} PRIVATE /WX)
-        endif()
         if(${CMAKE_C_COMPILER_ID} MATCHES "MSVC")
             target_compile_options(
                 ${name}
@@ -387,8 +387,7 @@ function(add_umf_library)
         ${ARG_NAME}
         PRIVATE ${UMF_CMAKE_SOURCE_DIR}/include
                 ${UMF_CMAKE_SOURCE_DIR}/src/utils
-                ${UMF_CMAKE_SOURCE_DIR}/src/base_alloc
-                ${UMF_CMAKE_SOURCE_DIR}/src/coarse)
+                ${UMF_CMAKE_SOURCE_DIR}/src/base_alloc)
     add_umf_target_compile_options(${ARG_NAME})
     add_umf_target_link_options(${ARG_NAME})
 endfunction()

@@ -1,23 +1,6 @@
-# Copyright (C) 2023-2024 Intel Corporation
+# Copyright (C) 2023 Intel Corporation
 # Under the Apache License v2.0 with LLVM Exceptions. See LICENSE.TXT.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
-include(FetchContent)
-FetchContent_Declare(
-    googlebenchmark
-    GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG v1.9.0)
-
-set(BENCHMARK_ENABLE_GTEST_TESTS
-    OFF
-    CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_TESTING
-    OFF
-    CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_INSTALL
-    OFF
-    CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googlebenchmark)
 
 # In MSVC builds, there is no way to determine the actual build type during the
 # CMake configuration step. Therefore, this message is printed in all MSVC
@@ -49,9 +32,9 @@ function(add_umf_benchmark)
         "${multiValueArgs}"
         ${ARGN})
 
-    set(BENCH_NAME umf-${ARG_NAME})
+    set(BENCH_NAME umf-bench-${ARG_NAME})
 
-    set(BENCH_LIBS ${ARG_LIBS} umf umf_utils)
+    set(BENCH_LIBS ${ARG_LIBS} umf)
 
     add_umf_executable(
         NAME ${BENCH_NAME}
@@ -59,8 +42,11 @@ function(add_umf_benchmark)
         LIBS ${BENCH_LIBS})
 
     target_include_directories(
-        ${BENCH_NAME} PRIVATE ${UMF_CMAKE_SOURCE_DIR}/include
-                              ${UMF_CMAKE_SOURCE_DIR}/src/utils)
+        ${BENCH_NAME}
+        PRIVATE ${UMF_CMAKE_SOURCE_DIR}/include
+                ${UMF_CMAKE_SOURCE_DIR}/src/utils
+                ${UMF_CMAKE_SOURCE_DIR}/test/common
+                ${UMF_CMAKE_SOURCE_DIR}/examples/common)
 
     target_link_directories(${BENCH_NAME} PRIVATE ${ARG_LIBDIRS})
 
@@ -69,17 +55,13 @@ function(add_umf_benchmark)
         COMMAND ${BENCH_NAME}
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-    if("${BENCH_NAME}" STREQUAL "umf-ubench")
-        # Benchmark passes if it prints "PASSED" in the output, because ubench
-        # of scalable pool fails if the confidence interval exceeds maximum
-        # permitted 2.5%.
-        set_tests_properties(
-            ${BENCH_NAME} PROPERTIES
-            LABELS "benchmark"
-            PASS_REGULAR_EXPRESSION "PASSED")
-    else()
-        set_tests_properties(${BENCH_NAME} PROPERTIES LABELS "benchmark")
-    endif()
+    # Benchmark passes if it prints "PASSED" in the output, because ubench of
+    # scalable pool fails if the confidence interval exceeds maximum permitted
+    # 2.5%.
+    set_tests_properties(
+        ${BENCH_NAME} PROPERTIES
+        LABELS "benchmark"
+        PASS_REGULAR_EXPRESSION "PASSED")
 
     if(WINDOWS)
         # append PATH to DLLs
@@ -89,11 +71,11 @@ function(add_umf_benchmark)
 
     if(UMF_BUILD_LIBUMF_POOL_DISJOINT)
         target_compile_definitions(${BENCH_NAME}
-                                   PRIVATE UMF_POOL_DISJOINT_ENABLED=1)
+                                   PRIVATE UMF_BUILD_LIBUMF_POOL_DISJOINT=1)
     endif()
-    if(UMF_POOL_JEMALLOC_ENABLED)
+    if(UMF_BUILD_LIBUMF_POOL_JEMALLOC)
         target_compile_definitions(${BENCH_NAME}
-                                   PRIVATE UMF_POOL_JEMALLOC_ENABLED=1)
+                                   PRIVATE UMF_BUILD_LIBUMF_POOL_JEMALLOC=1)
     endif()
     if(UMF_POOL_SCALABLE_ENABLED)
         target_compile_definitions(${BENCH_NAME}
@@ -101,10 +83,7 @@ function(add_umf_benchmark)
     endif()
     if(UMF_BUILD_LEVEL_ZERO_PROVIDER)
         target_compile_definitions(${BENCH_NAME}
-                                   PRIVATE UMF_PROVIDER_LEVEL_ZERO_ENABLED=1)
-        target_include_directories(
-            ${BENCH_NAME} PRIVATE ${UMF_CMAKE_SOURCE_DIR}/test/common
-                                  ${LEVEL_ZERO_INCLUDE_DIRS})
+                                   PRIVATE UMF_BUILD_LEVEL_ZERO_PROVIDER=1)
     endif()
     if(UMF_BUILD_CUDA_PROVIDER)
         target_compile_definitions(${BENCH_NAME}
@@ -121,11 +100,14 @@ set(LIB_DIRS ${LIBHWLOC_LIBRARY_DIRS})
 if(UMF_BUILD_LIBUMF_POOL_DISJOINT)
     set(LIBS_OPTIONAL ${LIBS_OPTIONAL} disjoint_pool)
 endif()
+if(UMF_BUILD_LIBUMF_POOL_JEMALLOC)
+    set(LIBS_OPTIONAL ${LIBS_OPTIONAL} jemalloc_pool ${JEMALLOC_LIBRARIES})
+    set(LIB_DIRS ${LIB_DIRS} ${JEMALLOC_LIBRARY_DIRS})
+endif()
 if(LINUX)
     set(LIBS_OPTIONAL ${LIBS_OPTIONAL} m)
 endif()
 if(UMF_BUILD_GPU_TESTS AND UMF_BUILD_LEVEL_ZERO_PROVIDER)
-    set(SRCS_OPTIONAL ${SRCS_OPTIONAL} ../src/utils/utils_level_zero.cpp)
     set(LIBS_OPTIONAL ${LIBS_OPTIONAL} ze_loader)
     # TODO add CUDA
 endif()
@@ -134,14 +116,8 @@ endif()
 
 add_umf_benchmark(
     NAME ubench
-    SRCS ubench.c ${SRCS_OPTIONAL}
+    SRCS ubench.c
     LIBS ${LIBS_OPTIONAL}
-    LIBDIRS ${LIB_DIRS})
-
-add_umf_benchmark(
-    NAME benchmark
-    SRCS benchmark.cpp
-    LIBS ${LIBS_OPTIONAL} benchmark::benchmark
     LIBDIRS ${LIB_DIRS})
 
 if(UMF_BUILD_BENCHMARKS_MT)

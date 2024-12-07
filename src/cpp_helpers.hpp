@@ -79,12 +79,12 @@ template <typename T> umf_memory_pool_ops_t poolOpsBase() {
     return ops;
 }
 
-template <typename T> constexpr umf_memory_provider_ops_t providerOpsBase() {
+template <typename T> umf_memory_provider_ops_t providerOpsBase() {
     umf_memory_provider_ops_t ops{};
     ops.version = UMF_VERSION_CURRENT;
     ops.finalize = [](void *obj) { delete reinterpret_cast<T *>(obj); };
     UMF_ASSIGN_OP(ops, T, alloc, UMF_RESULT_ERROR_UNKNOWN);
-    UMF_ASSIGN_OP(ops, T, free, UMF_RESULT_ERROR_UNKNOWN);
+    UMF_ASSIGN_OP(ops.ext, T, free, UMF_RESULT_ERROR_UNKNOWN);
     UMF_ASSIGN_OP_NORETURN(ops, T, get_last_native_error);
     UMF_ASSIGN_OP(ops, T, get_recommended_page_size, UMF_RESULT_ERROR_UNKNOWN);
     UMF_ASSIGN_OP(ops, T, get_min_page_size, UMF_RESULT_ERROR_UNKNOWN);
@@ -134,7 +134,7 @@ template <typename T, typename ParamType> umf_memory_pool_ops_t poolMakeCOps() {
 // C API. 'params' from ops.initialize will be casted to 'ParamType*'
 // and passed to T::initialize() function.
 template <typename T, typename ParamType>
-constexpr umf_memory_provider_ops_t providerMakeCOps() {
+umf_memory_provider_ops_t providerMakeCOps() {
     umf_memory_provider_ops_t ops = detail::providerOpsBase<T>();
 
     ops.initialize = []([[maybe_unused]] void *params, void **obj) {

@@ -88,11 +88,7 @@ umf_ba_linear_pool_t *umf_ba_linear_create(size_t pool_size) {
         pool_size = MINIMUM_LINEAR_POOL_SIZE;
     }
 
-    pool_size = ALIGN_UP_SAFE(pool_size, ba_os_get_page_size());
-    if (pool_size == 0) {
-        LOG_ERR("pool_size page alignment overflow");
-        return NULL;
-    }
+    pool_size = ALIGN_UP(pool_size, ba_os_get_page_size());
 
     umf_ba_linear_pool_t *pool = (umf_ba_linear_pool_t *)ba_os_alloc(pool_size);
     if (!pool) {
@@ -126,11 +122,7 @@ void *umf_ba_linear_alloc(umf_ba_linear_pool_t *pool, size_t size) {
     if (size == 0) {
         return NULL;
     }
-    size_t aligned_size = ALIGN_UP_SAFE(size, MEMORY_ALIGNMENT);
-    if (aligned_size == 0) {
-        LOG_ERR("size alignment overflow");
-        return NULL;
-    }
+    size_t aligned_size = ALIGN_UP(size, MEMORY_ALIGNMENT);
     utils_mutex_lock(&pool->metadata.lock);
     if (pool->metadata.size_left < aligned_size) {
         size_t pool_size = MINIMUM_LINEAR_POOL_SIZE;
@@ -138,12 +130,7 @@ void *umf_ba_linear_alloc(umf_ba_linear_pool_t *pool, size_t size) {
             pool_size - offsetof(umf_ba_next_linear_pool_t, data);
         if (usable_size < aligned_size) {
             pool_size += aligned_size - usable_size;
-            pool_size = ALIGN_UP_SAFE(pool_size, ba_os_get_page_size());
-            if (pool_size == 0) {
-                utils_mutex_unlock(&pool->metadata.lock);
-                LOG_ERR("pool_size page alignment overflow");
-                return NULL;
-            }
+            pool_size = ALIGN_UP(pool_size, ba_os_get_page_size());
         }
 
         assert(pool_size - offsetof(umf_ba_next_linear_pool_t, data) >=

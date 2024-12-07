@@ -13,9 +13,10 @@
 #include "ipc_cuda_prov_common.h"
 
 void memcopy(void *dst, const void *src, size_t size, void *context) {
-    cuda_copy_ctx_t *cu_params = (cuda_copy_ctx_t *)context;
-    int ret = cuda_copy(cu_params->context, cu_params->device, dst, (void *)src,
-                        size);
+    cuda_memory_provider_params_t *cu_params =
+        (cuda_memory_provider_params_t *)context;
+    int ret = cuda_copy(cu_params->cuda_context_handle,
+                        cu_params->cuda_device_handle, dst, src, size);
     if (ret != 0) {
         fprintf(stderr, "cuda_copy failed with error %d\n", ret);
     }

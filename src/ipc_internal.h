@@ -21,10 +21,8 @@ extern "C" {
 // providerIpcData is a Flexible Array Member because its size varies
 // depending on the provider.
 typedef struct umf_ipc_data_t {
-    uint64_t handle_id; // unique ID of this handle
-    void *base;         // base address of the memory
-    int pid;            // process ID of the process that allocated the memory
-    size_t baseSize;    // size of base (coarse-grain) allocation
+    int pid;         // process ID of the process that allocated the memory
+    size_t baseSize; // size of base (coarse-grain) allocation
     uint64_t offset;
     char providerIpcData[];
 } umf_ipc_data_t;

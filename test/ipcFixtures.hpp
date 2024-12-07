@@ -46,8 +46,6 @@ class HostMemoryAccessor : public MemoryAccessor {
     }
 };
 
-// ipcTestParams:
-// pool_ops, pool_params, provider_ops, provider_params, memoryAccessor
 using ipcTestParams =
     std::tuple<umf_memory_pool_ops_t *, void *, umf_memory_provider_ops_t *,
                void *, MemoryAccessor *>;
@@ -168,12 +166,6 @@ TEST_P(umfIpcTest, GetIPCHandleInvalidArgs) {
     EXPECT_EQ(ret, UMF_RESULT_SUCCESS);
 }
 
-TEST_P(umfIpcTest, CloseIPCHandleInvalidPtr) {
-    int local_var;
-    auto ret = umfCloseIPCHandle(&local_var);
-    EXPECT_EQ(ret, UMF_RESULT_ERROR_INVALID_ARGUMENT);
-}
-
 TEST_P(umfIpcTest, BasicFlow) {
     constexpr size_t SIZE = 100;
     std::vector<int> expected_data(SIZE);
@@ -231,7 +223,8 @@ TEST_P(umfIpcTest, BasicFlow) {
     pool.reset(nullptr);
     EXPECT_EQ(stat.getCount, 1);
     EXPECT_EQ(stat.putCount, stat.getCount);
-    EXPECT_EQ(stat.openCount, 1);
+    // TODO: enale check below once cache for open IPC handles is implemented
+    // EXPECT_EQ(stat.openCount, 1);
     EXPECT_EQ(stat.closeCount, stat.openCount);
 }
 
@@ -340,6 +333,7 @@ TEST_P(umfIpcTest, AllocFreeAllocTest) {
     EXPECT_EQ(ret, UMF_RESULT_SUCCESS);
 
     pool.reset(nullptr);
+    EXPECT_EQ(stat.allocCount, stat.getCount);
     EXPECT_EQ(stat.getCount, stat.putCount);
     EXPECT_EQ(stat.openCount, stat.getCount);
     EXPECT_EQ(stat.openCount, stat.closeCount);
@@ -507,7 +501,8 @@ TEST_P(umfIpcTest, ConcurrentOpenCloseHandles) {
     pool.reset(nullptr);
     EXPECT_EQ(stat.getCount, stat.allocCount);
     EXPECT_EQ(stat.putCount, stat.getCount);
-    EXPECT_EQ(stat.openCount, stat.allocCount);
+    // TODO: enale check below once cache for open IPC handles is implemented
+    // EXPECT_EQ(stat.openCount, stat.allocCount);
     EXPECT_EQ(stat.openCount, stat.closeCount);
 }
 

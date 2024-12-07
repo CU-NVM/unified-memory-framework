@@ -7,13 +7,11 @@
  *
  */
 
-#include <stdio.h>
-
 #include <umf/memory_pool.h>
 #include <umf/pools/pool_disjoint.h>
 #include <umf/providers/provider_level_zero.h>
 
-#include "examples_level_zero_helpers.h"
+#include "utils_level_zero.h"
 
 int main(void) {
     // A result object for storing UMF API result status
@@ -51,51 +49,22 @@ int main(void) {
 
     // Setup parameters for the Level Zero memory provider. It will be used for
     // allocating memory from Level Zero devices.
-    umf_level_zero_memory_provider_params_handle_t ze_memory_provider_params =
-        NULL;
-    res = umfLevelZeroMemoryProviderParamsCreate(&ze_memory_provider_params);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to create memory provider params!\n");
-        ret = -1;
-        goto level_zero_destroy;
-    }
-
-    res = umfLevelZeroMemoryProviderParamsSetContext(ze_memory_provider_params,
-                                                     hContext);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to set context in memory provider params!\n");
-        ret = -1;
-        goto provider_params_destroy;
-    }
-
-    res = umfLevelZeroMemoryProviderParamsSetDevice(ze_memory_provider_params,
-                                                    hDevice);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to set device in memory provider params!\n");
-        ret = -1;
-        goto provider_params_destroy;
-    }
-
+    level_zero_memory_provider_params_t ze_memory_provider_params = {0};
+    ze_memory_provider_params.level_zero_context_handle = hContext;
+    ze_memory_provider_params.level_zero_device_handle = hDevice;
     // Set the memory type to shared to allow the memory to be accessed on both
     // CPU and GPU.
-    res = umfLevelZeroMemoryProviderParamsSetMemoryType(
-        ze_memory_provider_params, UMF_MEMORY_TYPE_SHARED);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "Failed to set memory type in memory provider params!\n");
-        ret = -1;
-        goto provider_params_destroy;
-    }
+    ze_memory_provider_params.memory_type = UMF_MEMORY_TYPE_SHARED;
 
     // Create Level Zero memory provider
     umf_memory_provider_handle_t ze_memory_provider;
-    res =
-        umfMemoryProviderCreate(umfLevelZeroMemoryProviderOps(),
-                                ze_memory_provider_params, &ze_memory_provider);
+    res = umfMemoryProviderCreate(umfLevelZeroMemoryProviderOps(),
+                                  &ze_memory_provider_params,
+                                  &ze_memory_provider);
     if (res != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "Failed to create a memory provider!\n");
         ret = -1;
-        goto provider_params_destroy;
+        goto level_zero_destroy;
     }
 
     printf("Level Zero memory provider created at %p\n",
@@ -103,54 +72,27 @@ int main(void) {
 
     // Setup parameters for the Disjoint Pool. It will be used for managing the
     // memory allocated using memory provider.
-    umf_disjoint_pool_params_handle_t disjoint_memory_pool_params = NULL;
-    res = umfDisjointPoolParamsCreate(&disjoint_memory_pool_params);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to create pool params!\n");
-        ret = -1;
-        goto memory_provider_destroy;
-    }
+    umf_disjoint_pool_params_t disjoint_memory_pool_params =
+        umfDisjointPoolParamsDefault();
     // Set the Slab Min Size to 64KB - the page size for GPU allocations
-    res = umfDisjointPoolParamsSetSlabMinSize(disjoint_memory_pool_params,
-                                              64 * 1024L);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to set Slab Min Size!\n");
-        ret = -1;
-        goto disjoint_params_destroy;
-    }
+    disjoint_memory_pool_params.SlabMinSize = 64 * 1024L;
     // We would keep only single slab per each allocation bucket
-    res = umfDisjointPoolParamsSetCapacity(disjoint_memory_pool_params, 1);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to set Capacity!\n");
-        ret = -1;
-        goto disjoint_params_destroy;
-    }
+    disjoint_memory_pool_params.Capacity = 1;
     // Set the maximum poolable size to 64KB - objects with size above this
     // limit will not be stored/allocated from the pool.
-    res = umfDisjointPoolParamsSetMaxPoolableSize(disjoint_memory_pool_params,
-                                                  64 * 1024L);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to set Max Poolable Size!\n");
-        ret = -1;
-        goto disjoint_params_destroy;
-    }
+    disjoint_memory_pool_params.MaxPoolableSize = 64 * 1024L;
     // Enable tracing
-    res = umfDisjointPoolParamsSetTrace(disjoint_memory_pool_params, 1);
-    if (res != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "Failed to set Trace!\n");
-        ret = -1;
-        goto disjoint_params_destroy;
-    }
+    disjoint_memory_pool_params.PoolTrace = 1;
 
     // Create Disjoint Pool memory pool.
     umf_memory_pool_handle_t ze_disjoint_memory_pool;
     res = umfPoolCreate(umfDisjointPoolOps(), ze_memory_provider,
-                        disjoint_memory_pool_params, UMF_POOL_CREATE_FLAG_NONE,
+                        &disjoint_memory_pool_params, UMF_POOL_CREATE_FLAG_NONE,
                         &ze_disjoint_memory_pool);
     if (res != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "Failed to create a memory pool!\n");
         ret = -1;
-        goto disjoint_params_destroy;
+        goto memory_provider_destroy;
     }
 
     printf("Disjoint Pool created at %p\n", (void *)ze_disjoint_memory_pool);
@@ -179,14 +121,8 @@ int main(void) {
 memory_pool_destroy:
     umfPoolDestroy(ze_disjoint_memory_pool);
 
-disjoint_params_destroy:
-    umfDisjointPoolParamsDestroy(disjoint_memory_pool_params);
-
 memory_provider_destroy:
     umfMemoryProviderDestroy(ze_memory_provider);
-
-provider_params_destroy:
-    umfLevelZeroMemoryProviderParamsDestroy(ze_memory_provider_params);
 
 level_zero_destroy:
     ret = destroy_context(hContext);

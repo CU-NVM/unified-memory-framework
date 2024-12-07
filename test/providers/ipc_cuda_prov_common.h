@@ -10,11 +10,6 @@
 
 #include <stddef.h>
 
-typedef struct cuda_copy_ctx_t {
-    CUcontext context;
-    CUdevice device;
-} cuda_copy_ctx_t;
-
 void memcopy(void *dst, const void *src, size_t size, void *context);
 
 #endif // UMF_TEST_IPC_CUDA_PROV_COMMON_H

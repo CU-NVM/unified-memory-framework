@@ -14,7 +14,6 @@
 #include <umf/memory_provider.h>
 
 #include "base.hpp"
-#include "base_alloc_global.h"
 #include "cpp_helpers.hpp"
 #include "test_helpers.h"
 
@@ -99,7 +98,7 @@ typedef struct provider_base_t {
 umf_memory_provider_ops_t BASE_PROVIDER_OPS =
     umf::providerMakeCOps<provider_base_t, void>();
 
-struct provider_ba_global : public provider_base_t {
+struct provider_malloc : public provider_base_t {
     umf_result_t alloc(size_t size, size_t align, void **ptr) noexcept {
         if (!align) {
             align = 8;
@@ -109,28 +108,33 @@ struct provider_ba_global : public provider_base_t {
         // requirement of 'size' being multiple of 'align' even though the
         // documentation says that it has to. AddressSanitizer returns an
         // error because of this issue.
-        size_t aligned_size = ALIGN_UP_SAFE(size, align);
-        if (aligned_size == 0) {
-            return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-        }
+        size_t aligned_size = ALIGN_UP(size, align);
 
-        *ptr = umf_ba_global_aligned_alloc(aligned_size, align);
+#ifdef _WIN32
+        *ptr = _aligned_malloc(aligned_size, align);
+#else
+        *ptr = ::aligned_alloc(align, aligned_size);
+#endif
 
         return (*ptr) ? UMF_RESULT_SUCCESS
                       : UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
     }
     umf_result_t free(void *ptr, size_t) noexcept {
-        umf_ba_global_free(ptr);
+#ifdef _WIN32
+        _aligned_free(ptr);
+#else
+        ::free(ptr);
+#endif
         return UMF_RESULT_SUCCESS;
     }
-    const char *get_name() noexcept { return "umf_ba_global"; }
+    const char *get_name() noexcept { return "malloc"; }
 };
 
-umf_memory_provider_ops_t BA_GLOBAL_PROVIDER_OPS =
-    umf::providerMakeCOps<provider_ba_global, void>();
+umf_memory_provider_ops_t MALLOC_PROVIDER_OPS =
+    umf::providerMakeCOps<provider_malloc, void>();
 
 struct provider_mock_out_of_mem : public provider_base_t {
-    provider_ba_global helper_prov;
+    provider_malloc helper_prov;
     int allocNum = 0;
     umf_result_t initialize(int *inAllocNum) noexcept {
         allocNum = *inAllocNum;

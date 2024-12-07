@@ -17,36 +17,12 @@ EXPORTS
     umfCoarseMemoryProviderGetStats
     umfCoarseMemoryProviderOps
     umfCUDAMemoryProviderOps
-    umfCUDAMemoryProviderParamsCreate
-    umfCUDAMemoryProviderParamsDestroy
-    umfCUDAMemoryProviderParamsSetContext
-    umfCUDAMemoryProviderParamsSetDevice
-    umfCUDAMemoryProviderParamsSetMemoryType
     umfDevDaxMemoryProviderOps
-    umfDevDaxMemoryProviderParamsCreate
-    umfDevDaxMemoryProviderParamsDestroy
-    umfDevDaxMemoryProviderParamsSetDeviceDax
-    umfDevDaxMemoryProviderParamsSetProtection
     umfFree
     umfFileMemoryProviderOps
-    umfFileMemoryProviderParamsCreate
-    umfFileMemoryProviderParamsDestroy
-    umfFileMemoryProviderParamsSetPath
-    umfFileMemoryProviderParamsSetProtection
-    umfFileMemoryProviderParamsSetVisibility
     umfGetIPCHandle
     umfGetLastFailedMemoryProvider
-    umfJemallocPoolOps
-    umfJemallocPoolParamsCreate
-    umfJemallocPoolParamsDestroy
-    umfJemallocPoolParamsSetKeepAllMemory
     umfLevelZeroMemoryProviderOps
-    umfLevelZeroMemoryProviderParamsCreate
-    umfLevelZeroMemoryProviderParamsDestroy
-    umfLevelZeroMemoryProviderParamsSetContext
-    umfLevelZeroMemoryProviderParamsSetDevice
-    umfLevelZeroMemoryProviderParamsSetMemoryType
-    umfLevelZeroMemoryProviderParamsSetResidentDevices
     umfMemoryProviderAlloc
     umfMemoryProviderAllocationMerge
     umfMemoryProviderAllocationSplit
@@ -90,15 +66,6 @@ EXPORTS
     umfMemtargetGetType
     umfOpenIPCHandle
     umfOsMemoryProviderOps
-    umfOsMemoryProviderParamsCreate
-    umfOsMemoryProviderParamsDestroy
-    umfOsMemoryProviderParamsSetProtection
-    umfOsMemoryProviderParamsSetVisibility
-    umfOsMemoryProviderParamsSetShmName
-    umfOsMemoryProviderParamsSetNumaList
-    umfOsMemoryProviderParamsSetNumaMode
-    umfOsMemoryProviderParamsSetPartSize
-    umfOsMemoryProviderParamsSetPartitions
     umfPoolAlignedMalloc
     umfPoolByPtr
     umfPoolCalloc
@@ -115,7 +82,3 @@ EXPORTS
     umfProxyPoolOps
     umfPutIPCHandle
     umfScalablePoolOps
-    umfScalablePoolParamsCreate
-    umfScalablePoolParamsDestroy
-    umfScalablePoolParamsSetGranularity
-    umfScalablePoolParamsSetKeepAllMemory

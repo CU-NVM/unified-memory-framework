@@ -45,11 +45,6 @@ int utils_close_fd(int fd) {
     return -1;
 }
 
-umf_result_t utils_errno_to_umf_result(int err) {
-    (void)err; // unused
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
 umf_result_t utils_duplicate_fd(int pid, int fd_in, int *fd_out) {
     (void)pid;    // unused
     (void)fd_in;  // unused
@@ -92,11 +87,6 @@ umf_result_t utils_translate_mem_protection_flags(unsigned in_protection,
     return UMF_RESULT_ERROR_INVALID_ARGUMENT;
 }
 
-int utils_translate_purge_advise(umf_purge_advise_t advise) {
-    (void)advise; // unused
-    return -1;
-}
-
 umf_result_t
 utils_translate_mem_visibility_flag(umf_memory_visibility_t in_flag,
                                     unsigned *out_flag) {
@@ -105,6 +95,8 @@ utils_translate_mem_visibility_flag(umf_memory_visibility_t in_flag,
         *out_flag = 0; // ignored on Windows
         return UMF_RESULT_SUCCESS;
     case UMF_MEM_MAP_SHARED:
+        return UMF_RESULT_ERROR_NOT_SUPPORTED; // not supported on Windows yet
+    case UMF_MEM_MAP_SYNC:
         return UMF_RESULT_ERROR_NOT_SUPPORTED; // not supported on Windows yet
     }
     return UMF_RESULT_ERROR_INVALID_ARGUMENT;
@@ -156,14 +148,13 @@ void *utils_mmap(void *hint_addr, size_t length, int prot, int flag, int fd,
 }
 
 void *utils_mmap_file(void *hint_addr, size_t length, int prot, int flags,
-                      int fd, size_t fd_offset, bool *map_sync) {
+                      int fd, size_t fd_offset) {
     (void)hint_addr; // unused
     (void)length;    // unused
     (void)prot;      // unused
     (void)flags;     // unused
     (void)fd;        // unused
     (void)fd_offset; // unused
-    (void)map_sync;  // unused
     return NULL;     // not supported
 }
 
@@ -224,11 +215,4 @@ int utils_fallocate(int fd, long offset, long len) {
     (void)len;    // unused
 
     return -1;
-}
-
-// Expected input:
-// char *str_threshold = utils_env_var_get_str("UMF_PROXY", "size.threshold=");
-long utils_get_size_threshold(char *str_threshold) {
-    (void)str_threshold; // unused
-    return 0;
 }

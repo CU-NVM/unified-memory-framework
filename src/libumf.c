@@ -10,10 +10,8 @@
 #include <stddef.h>
 
 #include "base_alloc_global.h"
-#include "ipc_cache.h"
 #include "memspace_internal.h"
 #include "provider_tracking.h"
-#include "utils_common.h"
 #include "utils_log.h"
 #if !defined(UMF_NO_HWLOC)
 #include "topology.h"
@@ -27,27 +25,9 @@ int umfInit(void) {
     if (utils_fetch_and_add64(&umfRefCount, 1) == 0) {
         utils_log_init();
         TRACKER = umfMemoryTrackerCreate();
-        if (!TRACKER) {
-            LOG_ERR("Failed to create memory tracker");
-            return -1;
-        }
-
-        LOG_DEBUG("UMF tracker created");
-
-        umf_result_t umf_result = umfIpcCacheGlobalInit();
-        if (umf_result != UMF_RESULT_SUCCESS) {
-            LOG_ERR("Failed to initialize IPC cache");
-            return -1;
-        }
-
-        LOG_DEBUG("UMF IPC cache initialized");
     }
 
-    if (TRACKER) {
-        LOG_DEBUG("UMF library initialized");
-    }
-
-    return 0;
+    return (TRACKER) ? 0 : -1;
 }
 
 void umfTearDown(void) {
@@ -59,27 +39,12 @@ void umfTearDown(void) {
         umfMemspaceLowestLatencyDestroy();
         umfDestroyTopology();
 #endif
-        umfIpcCacheGlobalTearDown();
-
-        if (utils_is_running_in_proxy_lib_with_size_threshold()) {
-            // We cannot destroy the TRACKER nor the base allocator
-            // when we are running in the proxy library with a size threshold,
-            // because it could result in calling the system free()
-            // with an invalid pointer and a segfault.
-            goto fini_umfTearDown;
-        }
-
         // make sure TRACKER is not used after being destroyed
         umf_memory_tracker_handle_t t = TRACKER;
         TRACKER = NULL;
         umfMemoryTrackerDestroy(t);
-        LOG_DEBUG("UMF tracker destroyed");
 
         umf_ba_destroy_global();
-        LOG_DEBUG("UMF base allocator destroyed");
-
-    fini_umfTearDown:
-        LOG_DEBUG("UMF library finalized");
     }
 }
 

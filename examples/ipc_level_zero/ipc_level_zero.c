@@ -8,90 +8,44 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "umf/ipc.h"
 #include "umf/memory_pool.h"
 #include "umf/pools/pool_disjoint.h"
 #include "umf/providers/provider_level_zero.h"
 
-#include "examples_level_zero_helpers.h"
+#include "utils_level_zero.h"
 
 int create_level_zero_pool(ze_context_handle_t context,
                            ze_device_handle_t device,
                            umf_memory_pool_handle_t *pool) {
     // setup params
-    umf_level_zero_memory_provider_params_handle_t provider_params = NULL;
-
-    umf_result_t umf_result =
-        umfLevelZeroMemoryProviderParamsCreate(&provider_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr,
-                "ERROR: Failed to create Level Zero memory provider params!\n");
-        return -1;
-    }
-
-    umf_result =
-        umfLevelZeroMemoryProviderParamsSetContext(provider_params, context);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "ERROR: Failed to set context in Level Zero memory "
-                        "provider params!\n");
-        umfLevelZeroMemoryProviderParamsDestroy(provider_params);
-        return -1;
-    }
-
-    umf_result =
-        umfLevelZeroMemoryProviderParamsSetDevice(provider_params, device);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "ERROR: Failed to set device in Level Zero memory "
-                        "provider params!\n");
-        umfLevelZeroMemoryProviderParamsDestroy(provider_params);
-        return -1;
-    }
-
-    umf_result = umfLevelZeroMemoryProviderParamsSetMemoryType(
-        provider_params, UMF_MEMORY_TYPE_DEVICE);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "ERROR: Failed to set memory type in Level Zero memory "
-                        "provider params!\n");
-        umfLevelZeroMemoryProviderParamsDestroy(provider_params);
-        return -1;
-    }
+    level_zero_memory_provider_params_t params = {0};
+    params.level_zero_context_handle = context;
+    params.level_zero_device_handle = device;
+    params.memory_type = UMF_MEMORY_TYPE_DEVICE;
 
     // create Level Zero provider
     umf_memory_provider_handle_t provider = 0;
-    umf_result = umfMemoryProviderCreate(umfLevelZeroMemoryProviderOps(),
-                                         provider_params, &provider);
-    umfLevelZeroMemoryProviderParamsDestroy(provider_params);
+    umf_result_t umf_result = umfMemoryProviderCreate(
+        umfLevelZeroMemoryProviderOps(), &params, &provider);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr,
                 "ERROR: Failed to create Level Zero memory provider!\n");
         return -1;
     }
 
-    umf_disjoint_pool_params_handle_t disjoint_params = NULL;
-    umf_result = umfDisjointPoolParamsCreate(&disjoint_params);
-    if (umf_result != UMF_RESULT_SUCCESS) {
-        fprintf(stderr, "ERROR: Failed to create pool params!\n");
-        goto provider_destroy;
-    }
-
     // create pool
     umf_pool_create_flags_t flags = UMF_POOL_CREATE_FLAG_OWN_PROVIDER;
-    umf_result = umfPoolCreate(umfDisjointPoolOps(), provider, disjoint_params,
+    umf_disjoint_pool_params_t disjoint_params = umfDisjointPoolParamsDefault();
+    umf_result = umfPoolCreate(umfDisjointPoolOps(), provider, &disjoint_params,
                                flags, pool);
-    umfDisjointPoolParamsDestroy(disjoint_params);
     if (umf_result != UMF_RESULT_SUCCESS) {
         fprintf(stderr, "ERROR: Failed to create pool!\n");
-        goto provider_destroy;
+        return -1;
     }
 
     return 0;
-
-provider_destroy:
-    umfMemoryProviderDestroy(provider);
-
-    return -1;
 }
 
 int main(void) {

@@ -22,77 +22,10 @@
 
 umf_memory_provider_ops_t *umfOsMemoryProviderOps(void) { return NULL; }
 
-umf_result_t umfOsMemoryProviderParamsCreate(
-    umf_os_memory_provider_params_handle_t *hParams) {
-    (void)hParams;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsDestroy(
-    umf_os_memory_provider_params_handle_t hParams) {
-    (void)hParams;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetProtection(
-    umf_os_memory_provider_params_handle_t hParams, unsigned protection) {
-    (void)hParams;
-    (void)protection;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetVisibility(
-    umf_os_memory_provider_params_handle_t hParams,
-    umf_memory_visibility_t visibility) {
-    (void)hParams;
-    (void)visibility;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetShmName(
-    umf_os_memory_provider_params_handle_t hParams, const char *shm_name) {
-    (void)hParams;
-    (void)shm_name;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetNumaList(
-    umf_os_memory_provider_params_handle_t hParams, unsigned *numa_list,
-    unsigned numa_list_len) {
-    (void)hParams;
-    (void)numa_list;
-    (void)numa_list_len;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetNumaMode(
-    umf_os_memory_provider_params_handle_t hParams, umf_numa_mode_t numa_mode) {
-    (void)hParams;
-    (void)numa_mode;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetPartSize(
-    umf_os_memory_provider_params_handle_t hParams, size_t part_size) {
-    (void)hParams;
-    (void)part_size;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetPartitions(
-    umf_os_memory_provider_params_handle_t hParams,
-    umf_numa_split_partition_t *partitions, unsigned partitions_len) {
-    (void)hParams;
-    (void)partitions;
-    (void)partitions_len;
-    return UMF_RESULT_ERROR_NOT_SUPPORTED;
-}
-
 #else // !defined(UMF_NO_HWLOC)
 
 #include "base_alloc_global.h"
 #include "critnib.h"
-#include "libumf.h"
 #include "provider_os_memory_internal.h"
 #include "utils_common.h"
 #include "utils_concurrency.h"
@@ -101,32 +34,6 @@ umf_result_t umfOsMemoryProviderParamsSetPartitions(
 #define NODESET_STR_BUF_LEN 1024
 
 #define TLS_MSG_BUF_LEN 1024
-
-typedef struct umf_os_memory_provider_params_t {
-    // Combination of 'umf_mem_protection_flags_t' flags
-    unsigned protection;
-    /// memory visibility mode
-    umf_memory_visibility_t visibility;
-    /// (optional) a name of a shared memory file (valid only in case of the shared memory visibility)
-    char *shm_name;
-
-    // NUMA config
-    /// ordered list of numa nodes
-    unsigned *numa_list;
-    /// length of numa_list
-    unsigned numa_list_len;
-
-    /// Describes how node list is interpreted
-    umf_numa_mode_t numa_mode;
-    /// part size for interleave mode - 0 means default (system specific)
-    /// It might be rounded up because of HW constraints
-    size_t part_size;
-
-    /// ordered list of the partitions for the split mode
-    umf_numa_split_partition_t *partitions;
-    /// len of the partitions array
-    unsigned partitions_len;
-} umf_os_memory_provider_params_t;
 
 typedef struct os_last_native_error_t {
     int32_t native_error;
@@ -434,22 +341,6 @@ validatePartitions(umf_os_memory_provider_params_t *params) {
     return UMF_RESULT_SUCCESS;
 }
 
-static umf_result_t os_get_min_page_size(void *provider, void *ptr,
-                                         size_t *page_size);
-
-static umf_result_t validatePartSize(os_memory_provider_t *provider,
-                                     umf_os_memory_provider_params_t *params) {
-    size_t page_size;
-    os_get_min_page_size(provider, NULL, &page_size);
-    if (ALIGN_UP(params->part_size, page_size) < params->part_size) {
-        LOG_ERR("partition size (%zu) is too big, cannot align with a page "
-                "size (%zu)",
-                params->part_size, page_size);
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-    return UMF_RESULT_SUCCESS;
-}
-
 static void free_bitmaps(os_memory_provider_t *provider) {
     for (unsigned i = 0; i < provider->nodeset_len; i++) {
         hwloc_bitmap_free(provider->nodeset[i]);
@@ -536,14 +427,6 @@ static umf_result_t translate_params(umf_os_memory_provider_params_t *in_params,
         return result;
     }
 
-    if (in_params->numa_mode == UMF_NUMA_MODE_INTERLEAVE) {
-        result = validatePartSize(provider, in_params);
-        if (result != UMF_RESULT_SUCCESS) {
-            LOG_ERR("incorrect partition size: %zu", in_params->part_size);
-            return result;
-        }
-    }
-
     int is_dedicated_node_bind = dedicated_node_bind(in_params);
     provider->numa_policy =
         translate_numa_mode(in_params->numa_mode, is_dedicated_node_bind);
@@ -571,7 +454,7 @@ static umf_result_t translate_params(umf_os_memory_provider_params_t *in_params,
 static umf_result_t os_initialize(void *params, void **provider) {
     umf_result_t ret;
 
-    if (params == NULL) {
+    if (provider == NULL || params == NULL) {
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
@@ -665,6 +548,11 @@ err_free_os_provider:
 }
 
 static void os_finalize(void *provider) {
+    if (provider == NULL) {
+        assert(0);
+        return;
+    }
+
     os_memory_provider_t *os_provider = provider;
 
     if (os_provider->fd > 0) {
@@ -685,6 +573,9 @@ static void os_finalize(void *provider) {
     hwloc_topology_destroy(os_provider->topo);
     umf_ba_global_free(os_provider);
 }
+
+static umf_result_t os_get_min_page_size(void *provider, void *ptr,
+                                         size_t *page_size);
 
 // TODO: this function should be re-enabled when CTL is implemented
 #if 0
@@ -922,12 +813,12 @@ static membind_t membindFirst(os_memory_provider_t *provider, void *addr,
     membind_t membind;
     memset(&membind, 0, sizeof(membind));
 
-    membind.alloc_size = size;
+    membind.alloc_size = ALIGN_UP(size, page_size);
     membind.page_size = page_size;
     membind.addr = addr;
     membind.pages = membind.alloc_size / membind.page_size;
     if (provider->nodeset_len == 1) {
-        membind.bind_size = size;
+        membind.bind_size = ALIGN_UP(size, membind.page_size);
         membind.bitmap = provider->nodeset[0];
         return membind;
     }
@@ -988,6 +879,10 @@ static umf_result_t os_alloc(void *provider, size_t size, size_t alignment,
                              void **resultPtr) {
     int ret;
 
+    if (provider == NULL || resultPtr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     os_memory_provider_t *os_provider = (os_memory_provider_t *)provider;
 
     size_t page_size;
@@ -1029,15 +924,7 @@ static umf_result_t os_alloc(void *provider, size_t size, size_t alignment,
 
     // Bind memory to NUMA nodes if numa_policy is other than DEFAULT
     if (os_provider->numa_policy != HWLOC_MEMBIND_DEFAULT) {
-        size_t first_size = ALIGN_UP_SAFE(size, page_size);
-        if (first_size == 0) {
-            LOG_ERR("size is too big, page align failed");
-            (void)utils_munmap(addr, size);
-            return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-        }
-
-        membind_t membind =
-            membindFirst(os_provider, addr, first_size, page_size);
+        membind_t membind = membindFirst(os_provider, addr, size, page_size);
         if (membind.bitmap == NULL) {
             goto err_unmap;
         }
@@ -1088,6 +975,10 @@ err_unmap:
 }
 
 static umf_result_t os_free(void *provider, void *ptr, size_t size) {
+    if (provider == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     if (ptr == NULL) {
         return UMF_RESULT_SUCCESS;
     }
@@ -1147,8 +1038,11 @@ static void os_get_last_native_error(void *provider, const char **ppMessage,
 
 static umf_result_t os_get_recommended_page_size(void *provider, size_t size,
                                                  size_t *page_size) {
-    (void)provider; // unused
-    (void)size;     // unused
+    (void)size; // unused
+
+    if (provider == NULL || page_size == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
 
     *page_size = utils_get_page_size();
 
@@ -1163,7 +1057,9 @@ static umf_result_t os_get_min_page_size(void *provider, void *ptr,
 }
 
 static umf_result_t os_purge_lazy(void *provider, void *ptr, size_t size) {
-    (void)provider; // unused
+    if (provider == NULL || ptr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
 
     errno = 0;
     if (utils_purge(ptr, size, UMF_PURGE_LAZY)) {
@@ -1177,7 +1073,9 @@ static umf_result_t os_purge_lazy(void *provider, void *ptr, size_t size) {
 }
 
 static umf_result_t os_purge_force(void *provider, void *ptr, size_t size) {
-    (void)provider; // unused
+    if (provider == NULL || ptr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
 
     errno = 0;
     if (utils_purge(ptr, size, UMF_PURGE_FORCE)) {
@@ -1255,8 +1153,6 @@ typedef struct os_ipc_data_t {
     int fd;
     size_t fd_offset;
     size_t size;
-    unsigned protection; // combination of OS-specific protection flags
-    unsigned visibility; // memory visibility mode
     // shm_name is a Flexible Array Member because it is optional and its size
     // varies on the Shared Memory object name
     size_t shm_name_len;
@@ -1264,6 +1160,10 @@ typedef struct os_ipc_data_t {
 } os_ipc_data_t;
 
 static umf_result_t os_get_ipc_handle_size(void *provider, size_t *size) {
+    if (provider == NULL || size == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     os_memory_provider_t *os_provider = (os_memory_provider_t *)provider;
     if (!os_provider->IPC_enabled) {
         LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
@@ -1278,6 +1178,10 @@ static umf_result_t os_get_ipc_handle_size(void *provider, size_t *size) {
 
 static umf_result_t os_get_ipc_handle(void *provider, const void *ptr,
                                       size_t size, void *providerIpcData) {
+    if (provider == NULL || ptr == NULL || providerIpcData == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     os_memory_provider_t *os_provider = (os_memory_provider_t *)provider;
     if (!os_provider->IPC_enabled) {
         LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
@@ -1286,7 +1190,9 @@ static umf_result_t os_get_ipc_handle(void *provider, const void *ptr,
 
     void *value = critnib_get(os_provider->fd_offset_map, (uintptr_t)ptr);
     if (value == NULL) {
-        LOG_ERR("getting a value from the IPC cache failed (addr=%p)", ptr);
+        LOG_ERR("os_get_ipc_handle(): getting a value from the IPC cache "
+                "failed (addr=%p)",
+                ptr);
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1294,13 +1200,10 @@ static umf_result_t os_get_ipc_handle(void *provider, const void *ptr,
     os_ipc_data->pid = utils_getpid();
     os_ipc_data->fd_offset = (size_t)value - 1;
     os_ipc_data->size = size;
-    os_ipc_data->protection = os_provider->protection;
-    os_ipc_data->visibility = os_provider->visibility;
     os_ipc_data->shm_name_len = strlen(os_provider->shm_name);
     if (os_ipc_data->shm_name_len > 0) {
-        // NOTE: +1 for '\0' at the end of the string
         strncpy(os_ipc_data->shm_name, os_provider->shm_name,
-                os_ipc_data->shm_name_len + 1);
+                os_ipc_data->shm_name_len);
     } else {
         os_ipc_data->fd = os_provider->fd;
     }
@@ -1309,6 +1212,10 @@ static umf_result_t os_get_ipc_handle(void *provider, const void *ptr,
 }
 
 static umf_result_t os_put_ipc_handle(void *provider, void *providerIpcData) {
+    if (provider == NULL || providerIpcData == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     os_memory_provider_t *os_provider = (os_memory_provider_t *)provider;
     if (!os_provider->IPC_enabled) {
         LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
@@ -1340,6 +1247,10 @@ static umf_result_t os_put_ipc_handle(void *provider, void *providerIpcData) {
 
 static umf_result_t os_open_ipc_handle(void *provider, void *providerIpcData,
                                        void **ptr) {
+    if (provider == NULL || providerIpcData == NULL || ptr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     os_memory_provider_t *os_provider = (os_memory_provider_t *)provider;
     if (!os_provider->IPC_enabled) {
         LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
@@ -1367,8 +1278,8 @@ static umf_result_t os_open_ipc_handle(void *provider, void *providerIpcData,
         }
     }
 
-    *ptr = utils_mmap(NULL, os_ipc_data->size, os_ipc_data->protection,
-                      os_ipc_data->visibility, fd, os_ipc_data->fd_offset);
+    *ptr = utils_mmap(NULL, os_ipc_data->size, os_provider->protection,
+                      os_provider->visibility, fd, os_ipc_data->fd_offset);
     if (*ptr == NULL) {
         os_store_last_native_error(UMF_OS_RESULT_ERROR_ALLOC_FAILED, errno);
         LOG_PERR("memory mapping failed");
@@ -1382,6 +1293,10 @@ static umf_result_t os_open_ipc_handle(void *provider, void *providerIpcData,
 
 static umf_result_t os_close_ipc_handle(void *provider, void *ptr,
                                         size_t size) {
+    if (provider == NULL || ptr == NULL) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
     os_memory_provider_t *os_provider = (os_memory_provider_t *)provider;
     if (!os_provider->IPC_enabled) {
         LOG_ERR("memory visibility mode is not UMF_MEM_MAP_SHARED")
@@ -1406,11 +1321,11 @@ static umf_memory_provider_ops_t UMF_OS_MEMORY_PROVIDER_OPS = {
     .initialize = os_initialize,
     .finalize = os_finalize,
     .alloc = os_alloc,
-    .free = os_free,
     .get_last_native_error = os_get_last_native_error,
     .get_recommended_page_size = os_get_recommended_page_size,
     .get_min_page_size = os_get_min_page_size,
     .get_name = os_get_name,
+    .ext.free = os_free,
     .ext.purge_lazy = os_purge_lazy,
     .ext.purge_force = os_purge_force,
     .ext.allocation_merge = os_allocation_merge,
@@ -1423,186 +1338,6 @@ static umf_memory_provider_ops_t UMF_OS_MEMORY_PROVIDER_OPS = {
 
 umf_memory_provider_ops_t *umfOsMemoryProviderOps(void) {
     return &UMF_OS_MEMORY_PROVIDER_OPS;
-}
-
-umf_result_t umfOsMemoryProviderParamsCreate(
-    umf_os_memory_provider_params_handle_t *hParams) {
-    libumfInit();
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    umf_os_memory_provider_params_handle_t params =
-        umf_ba_global_alloc(sizeof(*params));
-    if (params == NULL) {
-        LOG_ERR("allocating memory for OS memory provider params failed");
-        return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-    }
-
-    params->protection = UMF_PROTECTION_READ | UMF_PROTECTION_WRITE;
-    params->visibility = UMF_MEM_MAP_PRIVATE;
-    params->shm_name = NULL;
-    params->numa_list = NULL;
-    params->numa_list_len = 0;
-    params->numa_mode = UMF_NUMA_MODE_DEFAULT;
-    params->part_size = 0;
-    params->partitions = NULL;
-    params->partitions_len = 0;
-
-    *hParams = params;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsDestroy(
-    umf_os_memory_provider_params_handle_t hParams) {
-    if (hParams != NULL) {
-        umf_ba_global_free(hParams->shm_name);
-        umf_ba_global_free(hParams->numa_list);
-        umf_ba_global_free(hParams->partitions);
-    }
-
-    umf_ba_global_free(hParams);
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetProtection(
-    umf_os_memory_provider_params_handle_t hParams, unsigned protection) {
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->protection = protection;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetVisibility(
-    umf_os_memory_provider_params_handle_t hParams,
-    umf_memory_visibility_t visibility) {
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->visibility = visibility;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetShmName(
-    umf_os_memory_provider_params_handle_t hParams, const char *shm_name) {
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    char *name = NULL;
-    if (shm_name) {
-        size_t len = strlen(shm_name) + 1;
-        name = umf_ba_global_alloc(len);
-        if (name == NULL) {
-            LOG_ERR("allocating memory for the shared memory name failed");
-            return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-        }
-
-        strncpy(name, shm_name, len);
-    }
-    umf_ba_global_free(hParams->shm_name);
-    hParams->shm_name = name;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetNumaList(
-    umf_os_memory_provider_params_handle_t hParams, unsigned *numa_list,
-    unsigned numa_list_len) {
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    if (numa_list_len && !numa_list) {
-        LOG_ERR("numa_list_len is not 0, but numa_list is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    unsigned *new_list = NULL;
-    if (numa_list_len) {
-        new_list = umf_ba_global_alloc(numa_list_len * sizeof(*new_list));
-        if (new_list == NULL) {
-            LOG_ERR("allocating memory for the NUMA list failed");
-            return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-        }
-
-        memcpy(new_list, numa_list, numa_list_len * sizeof(*new_list));
-    }
-
-    umf_ba_global_free(hParams->numa_list);
-    hParams->numa_list = new_list;
-    hParams->numa_list_len = numa_list_len;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetNumaMode(
-    umf_os_memory_provider_params_handle_t hParams, umf_numa_mode_t numa_mode) {
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->numa_mode = numa_mode;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetPartSize(
-    umf_os_memory_provider_params_handle_t hParams, size_t part_size) {
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->part_size = part_size;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t umfOsMemoryProviderParamsSetPartitions(
-    umf_os_memory_provider_params_handle_t hParams,
-    umf_numa_split_partition_t *partitions, unsigned partitions_len) {
-    if (hParams == NULL) {
-        LOG_ERR("OS memory provider params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    if (partitions_len && !partitions) {
-        LOG_ERR("partitions_len is not 0, but partitions is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    umf_numa_split_partition_t *new_partitions = NULL;
-    if (partitions_len) {
-        new_partitions =
-            umf_ba_global_alloc(partitions_len * sizeof(*new_partitions));
-        if (new_partitions == NULL) {
-            LOG_ERR("allocating memory for the partitions failed");
-            return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-        }
-
-        memcpy(new_partitions, partitions,
-               partitions_len * sizeof(*new_partitions));
-    }
-
-    umf_ba_global_free(hParams->partitions);
-    hParams->partitions = new_partitions;
-    hParams->partitions_len = partitions_len;
-
-    return UMF_RESULT_SUCCESS;
 }
 
 #endif // !defined(UMF_NO_HWLOC)

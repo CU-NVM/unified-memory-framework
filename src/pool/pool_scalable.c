@@ -19,7 +19,6 @@
 #include <umf/pools/pool_scalable.h>
 
 #include "base_alloc_global.h"
-#include "libumf.h"
 #include "utils_common.h"
 #include "utils_concurrency.h"
 #include "utils_load_library.h"
@@ -32,7 +31,6 @@ typedef void (*raw_free_tbb_type)(intptr_t, void *, size_t);
 static __TLS umf_result_t TLS_last_allocation_error;
 static __TLS umf_result_t TLS_last_free_error;
 
-static const size_t DEFAULT_GRANULARITY = 2 * 1024 * 1024; // 2MB
 typedef struct tbb_mem_pool_policy_t {
     raw_alloc_tbb_type pAlloc;
     raw_free_tbb_type pFree;
@@ -40,11 +38,6 @@ typedef struct tbb_mem_pool_policy_t {
     int version;
     unsigned fixed_pool : 1, keep_all_memory : 1, reserved : 30;
 } tbb_mem_pool_policy_t;
-
-typedef struct umf_scalable_pool_params_t {
-    size_t granularity;
-    bool keep_all_memory;
-} umf_scalable_pool_params_t;
 
 typedef struct tbb_callbacks_t {
     void *(*pool_malloc)(void *, size_t);
@@ -174,88 +167,18 @@ static void tbb_raw_free_wrapper(intptr_t pool_id, void *ptr, size_t bytes) {
     }
 }
 
-umf_result_t
-umfScalablePoolParamsCreate(umf_scalable_pool_params_handle_t *hParams) {
-    libumfInit();
-    if (!hParams) {
-        LOG_ERR("scalable pool params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    umf_scalable_pool_params_t *params_data =
-        umf_ba_global_alloc(sizeof(umf_scalable_pool_params_t));
-    if (!params_data) {
-        LOG_ERR("cannot allocate memory for scalable pool params");
-        return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
-    }
-
-    params_data->granularity = DEFAULT_GRANULARITY;
-    params_data->keep_all_memory = false;
-
-    *hParams = (umf_scalable_pool_params_handle_t)params_data;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t
-umfScalablePoolParamsDestroy(umf_scalable_pool_params_handle_t hParams) {
-    if (!hParams) {
-        LOG_ERR("scalable pool params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    umf_ba_global_free(hParams);
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t
-umfScalablePoolParamsSetGranularity(umf_scalable_pool_params_handle_t hParams,
-                                    size_t granularity) {
-    if (!hParams) {
-        LOG_ERR("scalable pool params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    if (granularity == 0) {
-        LOG_ERR("granularity cannot be 0");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->granularity = granularity;
-
-    return UMF_RESULT_SUCCESS;
-}
-
-umf_result_t
-umfScalablePoolParamsSetKeepAllMemory(umf_scalable_pool_params_handle_t hParams,
-                                      bool keepAllMemory) {
-    if (!hParams) {
-        LOG_ERR("scalable pool params handle is NULL");
-        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
-    hParams->keep_all_memory = keepAllMemory;
-
-    return UMF_RESULT_SUCCESS;
-}
-
 static umf_result_t tbb_pool_initialize(umf_memory_provider_handle_t provider,
                                         void *params, void **pool) {
+    (void)params; // unused
+
+    const size_t GRANULARITY = 2 * 1024 * 1024;
     tbb_mem_pool_policy_t policy = {.pAlloc = tbb_raw_alloc_wrapper,
                                     .pFree = tbb_raw_free_wrapper,
-                                    .granularity = DEFAULT_GRANULARITY,
+                                    .granularity = GRANULARITY,
                                     .version = 1,
                                     .fixed_pool = false,
                                     .keep_all_memory = false,
                                     .reserved = 0};
-
-    if (params) {
-        umf_scalable_pool_params_handle_t scalable_params =
-            (umf_scalable_pool_params_handle_t)params;
-        policy.granularity = scalable_params->granularity;
-        policy.keep_all_memory = scalable_params->keep_all_memory;
-    }
 
     tbb_memory_pool_t *pool_data =
         umf_ba_global_alloc(sizeof(tbb_memory_pool_t));

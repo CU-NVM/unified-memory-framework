@@ -1,8 +1,0 @@
-{
-   [false-positive] Double check locking pattern in trackingOpenIpcHandle
-   Helgrind:Race
-   fun:trackingOpenIpcHandle
-   fun:umfMemoryProviderOpenIPCHandle
-   fun:umfOpenIPCHandle
-   ...
-}

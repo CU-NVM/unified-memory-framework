@@ -16,18 +16,15 @@
 #include <libloaderapi.h>
 // clang-format on
 
-#else // _WIN32
+#else
 
 #define _GNU_SOURCE 1
 
 #include <dlfcn.h> // forces linking with libdl on Linux
 
-#endif // !_WIN32
-
-#include <stddef.h>
+#endif
 
 #include "utils_load_library.h"
-#include "utils_log.h"
 
 #ifdef _WIN32
 
@@ -50,13 +47,7 @@ void *utils_get_symbol_addr(void *handle, const char *symbol,
         }
         handle = GetModuleHandle(libname);
     }
-
-    void *addr = (void *)GetProcAddress((HMODULE)handle, symbol);
-    if (addr == NULL) {
-        LOG_ERR("Required symbol not found: %s", symbol);
-    }
-
-    return addr;
+    return (void *)GetProcAddress((HMODULE)handle, symbol);
 }
 
 #else /* Linux */
@@ -66,13 +57,7 @@ void *utils_open_library(const char *filename, int userFlags) {
     if (userFlags & UMF_UTIL_OPEN_LIBRARY_GLOBAL) {
         dlopenFlags |= RTLD_GLOBAL;
     }
-
-    void *handle = dlopen(filename, dlopenFlags);
-    if (handle == NULL) {
-        LOG_FATAL("dlopen(%s) failed with error: %s", filename, dlerror());
-    }
-
-    return handle;
+    return dlopen(filename, dlopenFlags);
 }
 
 int utils_close_library(void *handle) { return dlclose(handle); }
@@ -83,13 +68,7 @@ void *utils_get_symbol_addr(void *handle, const char *symbol,
     if (!handle) {
         handle = RTLD_DEFAULT;
     }
-
-    void *addr = dlsym(handle, symbol);
-    if (addr == NULL) {
-        LOG_ERR("required symbol not found: %s (error: %s)", symbol, dlerror());
-    }
-
-    return addr;
+    return dlsym(handle, symbol);
 }
 
 #endif
