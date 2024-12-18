@@ -89,7 +89,7 @@ umfFastJemallocMalloc(umf_memory_pool_handle_t hPool, size_t size){
 	arena_spin++;
 	if(arena_spin>=je_pool->num_arenas){arena_spin=0;}
 	int arena = je_pool->arena_index + arena_spin;
-    int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    uint64_t flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
     void *ptr = mallocx(size, flags);
     if (ptr == NULL) {
         //TLS_last_allocation_error = UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
