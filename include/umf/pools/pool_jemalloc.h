@@ -43,7 +43,7 @@ typedef struct umf_memory_pool_t {
 } umf_memory_pool_t;
 
 
-#define MAX_JEMALLOC_THREADS 200
+#define MAX_JEMALLOC_THREADS 1024
 
 /// @brief Configuration of Jemalloc Pool
 typedef struct umf_jemalloc_pool_params_t {
@@ -89,7 +89,7 @@ umfFastJemallocMalloc(umf_memory_pool_handle_t hPool, size_t size){
 	arena_spin++;
 	if(arena_spin>=je_pool->num_arenas){arena_spin=0;}
 	int arena = je_pool->arena_index + arena_spin;
-    int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    uint64_t flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
     void *ptr = mallocx(size, flags);
     if (ptr == NULL) {
         //TLS_last_allocation_error = UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
