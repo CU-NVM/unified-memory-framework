@@ -154,7 +154,7 @@ umf_result_t umfFastJemallocFree(umf_memory_pool_handle_t hPool, void* ptr){
         // dallocx(ptr, MALLOCX_TCACHE(je_pool->tcaches[tid()]));
         
         dallocx(ptr, MALLOCX_TCACHE(get_tcache(je_pool,tid())));
-        free(je_pool->tcaches);
+    //    free(je_pool->tcaches); 
     }
 
     return UMF_RESULT_SUCCESS;
