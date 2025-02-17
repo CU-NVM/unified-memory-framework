@@ -25,6 +25,7 @@
 #include <threads.h>
 #include <stdatomic.h>
 
+
 // The Windows version of jemalloc uses API with je_ prefix,
 // while the Linux one does not.
 #ifndef _WIN32
@@ -40,6 +41,69 @@ __thread unsigned arena_spin=0;
 atomic_int thread_count=0;
 
 #define MALLOCX_ARENA_MAX (MALLCTL_ARENAS_ALL - 1)
+
+
+unsigned get_tcache(jemalloc_memory_pool_t* je_pool, unsigned tid ){
+    assert(je_pool);
+    // assert(je_pool->tcaches_resize_lk);
+    access_tcaches:
+    pthread_rwlock_rdlock(&je_pool->tcaches_resize_lk);
+    if(tid < je_pool->tcaches_size){
+        unsigned tcache_tid = je_pool->tcaches[tid];
+        pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+        return tcache_tid;
+    } else {
+        pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+        pthread_rwlock_wrlock(&je_pool->tcaches_resize_lk);
+        if (tid>= je_pool->tcaches_size){
+            //resising tcaches
+            unsigned *temp_tcaches = (unsigned *)realloc(je_pool->tcaches, tid * sizeof(unsigned));
+            if (!temp_tcaches) {
+                // printf("temp_tcaches realloc failed");
+                pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+                exit(EXIT_FAILURE);
+            }
+            je_pool->tcaches = temp_tcaches;
+            je_pool->tcaches_size = tid+1;
+        }
+        pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+        goto access_tcaches;
+    }
+}
+
+unsigned set_tcache(jemalloc_memory_pool_t* je_pool, unsigned tid, unsigned tcache){
+    assert(je_pool);
+    // assert(je_pool->tcaches_resize_lk);
+    access_tcaches:
+    pthread_rwlock_rdlock(&je_pool->tcaches_resize_lk);
+    if(tid < je_pool->tcaches_size){
+        je_pool->tcaches[tid] = tcache;
+        pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+    } else {
+        pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+        pthread_rwlock_wrlock(&je_pool->tcaches_resize_lk);
+        if (tid>= je_pool->tcaches_size){
+            //resising tcaches
+            unsigned *temp_tcaches = (unsigned *)realloc(je_pool->tcaches, tid * sizeof(unsigned));
+            if (!temp_tcaches) {
+                // printf("temp_tcaches realloc failed");
+                pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+                exit(EXIT_FAILURE);
+            }
+            je_pool->tcaches = temp_tcaches;
+            je_pool->tcaches_size = tid+1;
+        }
+        pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+        goto access_tcaches;
+    }
+}
+
+
+
+
+
+
+
 
 
 
@@ -315,7 +379,8 @@ static void *op_malloc(void *pool, size_t size) {
 	arena_spin++;
 	if(arena_spin>=je_pool->num_arenas){arena_spin=0;}
 	int arena = je_pool->arena_index + arena_spin;
-    int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    // int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(get_tcache(je_pool,tid()));
     void *ptr = je_mallocx(size, flags);
     if (ptr == NULL) {
         TLS_last_allocation_error = UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
@@ -335,7 +400,9 @@ static umf_result_t op_free(void *pool, void *ptr) {
 
     if (ptr != NULL) {
         VALGRIND_DO_MEMPOOL_FREE(pool, ptr);
-        je_dallocx(ptr, MALLOCX_TCACHE(je_pool->tcaches[tid()]));
+        // je_dallocx(ptr, MALLOCX_TCACHE(je_pool->tcaches[tid()]));
+        je_dallocx(ptr, MALLOCX_TCACHE(get_tcache(je_pool,tid())));
+        
     }
 
     return UMF_RESULT_SUCCESS;
@@ -361,7 +428,8 @@ static void *op_realloc(void *pool, void *ptr, size_t size) {
     jemalloc_memory_pool_t *je_pool = (jemalloc_memory_pool_t *)pool;
 
     if (size == 0 && ptr != NULL) {
-        je_dallocx(ptr, MALLOCX_TCACHE(je_pool->tcaches[tid()]));
+        // je_dallocx(ptr, MALLOCX_TCACHE(je_pool->tcaches[tid()]));
+        je_dallocx(ptr, MALLOCX_TCACHE(get_tcache(je_pool,tid())));
         TLS_last_allocation_error = UMF_RESULT_SUCCESS;
         VALGRIND_DO_MEMPOOL_FREE(pool, ptr);
         return NULL;
@@ -373,7 +441,8 @@ static void *op_realloc(void *pool, void *ptr, size_t size) {
 	arena_spin++;
 	if(arena_spin>=je_pool->num_arenas){arena_spin=0;}
 	int arena = je_pool->arena_index + arena_spin;
-    int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    // int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    int flags = MALLOCX_ARENA(arena) | MALLOCX_TCACHE(get_tcache(je_pool,tid()));
     void *new_ptr = je_rallocx(ptr, size, flags);
     if (new_ptr == NULL) {
         TLS_last_allocation_error = UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
@@ -397,7 +466,8 @@ static void *op_aligned_alloc(void *pool, size_t size, size_t alignment) {
 	arena_spin++;
 	if(arena_spin>=je_pool->num_arenas){arena_spin=0;}
 	int arena = je_pool->arena_index + arena_spin;
-    int flags = MALLOCX_ALIGN(alignment) | MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    // int flags = MALLOCX_ALIGN(alignment) | MALLOCX_ARENA(arena) | MALLOCX_TCACHE(je_pool->tcaches[tid()]);
+    int flags = MALLOCX_ALIGN(alignment) | MALLOCX_ARENA(arena) | MALLOCX_TCACHE(get_tcache(je_pool,tid()));
     // MALLOCX_TCACHE_NONE is set, because jemalloc can mix objects from different arenas inside
     // the tcache, so we wouldn't be able to guarantee isolation of different providers.
     void *ptr = je_mallocx(size, flags);
@@ -431,7 +501,10 @@ static umf_result_t op_initialize(umf_memory_provider_handle_t provider,
 
     pool->provider = provider;
 	pool->num_arenas = 160;
-
+    pool->tcaches_size = 1;
+    pool->tcaches = malloc(pool->tcaches_size * sizeof(unsigned));
+    int lk_init_fail = pthread_rwlock_init(&pool->tcaches_resize_lk, NULL);
+    assert(lk_init_fail==0);
     if (je_params) {
         pool->disable_provider_free = je_params->disable_provider_free;
     } else {
@@ -473,7 +546,8 @@ static umf_result_t op_initialize(umf_memory_provider_handle_t provider,
 		unsigned tcache;
 		size_t sz = sizeof(unsigned);
 		je_mallctl("tcache.create",&tcache,&sz,NULL,0);
-		pool->tcaches[i] = tcache;
+		// pool->tcaches[i] = tcache;
+        set_tcache(pool,i,tcache);
 		// printf("Creating tcache: %d\n",tcache);
 	}
 	
@@ -496,7 +570,8 @@ static void op_finalize(void *pool) {
 		pool_by_arena_index[je_pool->arena_index] = NULL;		
 	}
 	for(unsigned i = 0; i< MAX_JEMALLOC_THREADS;i++){
-		unsigned tcache = je_pool->tcaches[i];
+		// unsigned tcache = je_pool->tcaches[i];
+        unsigned tcache = get_tcache(je_pool,i);
 		size_t sz = sizeof(unsigned);
 		je_mallctl("tcache.destroy",NULL,0,&tcache,sz);
 	}

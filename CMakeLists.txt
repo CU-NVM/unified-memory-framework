@@ -92,6 +92,12 @@ if(UMF_BUILD_TESTS
     )
 endif()
 
+if (UMF_USE_VALGRIND)
+    message(STATUS "Valgrind instrumentation enabled")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")  # Enable debugging symbols and disable optimizations
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
+endif()
+
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     set(LINUX TRUE)
     set(OS_NAME "linux")
