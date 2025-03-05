@@ -504,7 +504,7 @@ static umf_result_t op_initialize(umf_memory_provider_handle_t provider,
     pool->provider = provider;
 	pool->num_arenas = 160;
     pool->tcaches_size = 1;
-    printf("Tcaches_size = %zu\n",pool->tcaches_size);
+    printf("Tcaches_size is %zu\n",pool->tcaches_size);
     pool->tcaches = malloc(pool->tcaches_size * sizeof(unsigned));
     int lk_init_fail = pthread_rwlock_init(&pool->tcaches_resize_lk, NULL);
     assert(lk_init_fail==0);
@@ -545,8 +545,11 @@ static umf_result_t op_initialize(umf_memory_provider_handle_t provider,
 	}
 	
 	// assert(MAX_JEMALLOC_THREADS<250);
-    // changed i < max jemalloc threads to i < tcaches_size
-	for(unsigned i = 0; i< pool->tcaches_size;i++){
+    assert(pool);
+    printf("Initial size: %zu\n",pool->tcaches_size);
+    // changed i < MAX_JEMALLOC_THREADS to i < tcaches_size
+    for(unsigned i = 0; i<pool->tcaches_size;i++){
+	// for(unsigned i = 0; i<MAX_JEMALLOC_THREADS;i++){
 		unsigned tcache;
 		size_t sz = sizeof(unsigned);
 		je_mallctl("tcache.create",&tcache,&sz,NULL,0);
@@ -573,7 +576,9 @@ static void op_finalize(void *pool) {
 		je_mallctl(cmd, NULL, 0, NULL, 0);
 		pool_by_arena_index[je_pool->arena_index] = NULL;		
 	}
-	for(unsigned i = 0; i< MAX_JEMALLOC_THREADS;i++){
+    // replace MAX_JEMALLOC_THREADS with pool->tcaches_size
+	// for(unsigned i = 0; i< MAX_JEMALLOC_THREADS;i++){
+    for(unsigned i = 0; i< je_pool->tcaches_size;i++){
 		// unsigned tcache = je_pool->tcaches[i];
         unsigned tcache = get_tcache(je_pool,i);
 		size_t sz = sizeof(unsigned);

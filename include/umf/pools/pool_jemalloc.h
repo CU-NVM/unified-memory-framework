@@ -147,10 +147,8 @@ unsigned get_tcache(jemalloc_memory_pool_t* je_pool, unsigned tid ){
 inline void* __attribute__((always_inline))
 umfFastJemallocMalloc(umf_memory_pool_handle_t hPool, size_t size){
 	assert(hPool!=NULL);
-
     jemalloc_memory_pool_t *je_pool = (jemalloc_memory_pool_t *)((void*)hPool->pool_priv);
 	assert(je_pool);
-	
 	/*
 	cycle through arenas associated with our pool
 	use tcache associated with this ppol
@@ -165,9 +163,7 @@ umfFastJemallocMalloc(umf_memory_pool_handle_t hPool, size_t size){
         //TLS_last_allocation_error = UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
         return NULL;
     }
-
     //VALGRIND_DO_MEMPOOL_ALLOC(hPool, ptr, size);
-
     return ptr;	
 }
 
