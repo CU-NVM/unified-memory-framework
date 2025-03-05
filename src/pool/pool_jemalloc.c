@@ -32,7 +32,7 @@
 #define je_mallocx mallocx
 #define je_dallocx dallocx
 #define je_rallocx rallocx
-#define je_mallctl mallctl
+// #define je_mallctl mallctl
 #define je_malloc_usable_size malloc_usable_size
 #endif
 
@@ -546,7 +546,7 @@ static umf_result_t op_initialize(umf_memory_provider_handle_t provider,
 	
 	// assert(MAX_JEMALLOC_THREADS<250);
     assert(pool);
-    printf("Initial size: %zu\n",pool->tcaches_size);
+    printf("Initial size:: %zu\n",pool->tcaches_size);
     // changed i < MAX_JEMALLOC_THREADS to i < tcaches_size
     for(unsigned i = 0; i<pool->tcaches_size;i++){
 	// for(unsigned i = 0; i<MAX_JEMALLOC_THREADS;i++){

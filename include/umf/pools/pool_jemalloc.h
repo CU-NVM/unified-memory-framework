@@ -46,6 +46,7 @@ typedef struct umf_memory_pool_t {
 
 
 #define MAX_JEMALLOC_THREADS 200
+#define je_mallctl mallctl
 
 /// @brief Configuration of Jemalloc Pool
 typedef struct umf_jemalloc_pool_params_t {
@@ -135,10 +136,19 @@ unsigned get_tcache(jemalloc_memory_pool_t* je_pool, unsigned tid ){
                 pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
                 exit(EXIT_FAILURE);
             }
+            
             je_pool->tcaches = temp_tcaches;
             je_pool->tcaches_size = tid+1;
+            pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+            unsigned tcache;
+            size_t sz = sizeof(unsigned);
+            je_mallctl("tcache.create",&tcache,&sz,NULL,0);
+            // pool->tcaches[i] = tcache;
+            set_tcache(je_pool,tid,tcache);
         }
+        else{
         pthread_rwlock_unlock(&je_pool->tcaches_resize_lk);
+        }
         goto access_tcaches;
     }
 }
